@@ -1,5 +1,5 @@
 use crate::ast::exp::IRObj;
-use crate::koopa_ir::koopa_ir::{DataFlowGraph, Func, IRBlock, InstId};
+use crate::koopa_ir::koopa_ir::{BasicBlock, DataFlowGraph, Func, InstId};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -41,7 +41,7 @@ pub struct Context {
     // current function
     pub func: Rc<Func>,
     // current block
-    pub ir_block: Option<Rc<IRBlock>>,
+    pub basic_block: Option<Rc<BasicBlock>>,
     // current function's symbol tables
     pub global_const_table: HashMap<String, IRObj>,
     // current function's pointer tables
@@ -49,10 +49,10 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn new(func: Rc<Func>, ir_block: Option<Rc<IRBlock>>) -> Self {
+    pub fn new(func: Rc<Func>, basic_block: Option<Rc<BasicBlock>>) -> Self {
         Context {
             func: Rc::clone(&func),
-            ir_block,
+            basic_block,
             global_const_table: HashMap::new(),
             global_pointer_table: HashMap::new(),
         }
@@ -68,21 +68,30 @@ impl ContextStack {
         ContextStack { stack: vec![] }
     }
 
-    pub fn enter_block_scope(&mut self, ir_block: Rc<IRBlock>) {
+    pub fn enter_block(&mut self, basic_block: Rc<BasicBlock>) {
+        let stack = &mut self.stack;
+        let last_context = stack.last_mut().unwrap();
+        // simple replacement of basic_block
+        last_context.basic_block = Some(basic_block);
+    }
+
+    pub fn enter_func(&mut self, func: Rc<Func>) {
+        let stack = &mut self.stack;
+        stack.push(Context::new(func, None));
+    }
+
+    pub fn enter_scope(&mut self) {
         let stack = &mut self.stack;
         let last_context = stack.last_mut().unwrap();
         let func = Rc::clone(&last_context.func);
+        let basic_block = Rc::clone(last_context.basic_block.as_ref().unwrap());
 
-        if last_context.ir_block.is_none() {
-            last_context.ir_block = Some(ir_block);
-        } else {
-            stack.push(Context::new(func, Some(ir_block)));
-        }
+        stack.push(Context::new(func, Some(basic_block)));
     }
 
-    pub fn enter_func_scope(&mut self, func: Rc<Func>) {
+    pub fn exit_func(&mut self) {
         let stack = &mut self.stack;
-        stack.push(Context::new(func, None));
+        stack.pop();
     }
 
     pub fn exit_scope(&mut self) {
@@ -166,14 +175,14 @@ impl ContextStack {
             panic!("No context available to get DFG");
         }
     }
-
+    
     pub fn get_current_inst_list(&self) -> Rc<RefCell<Vec<InstId>>> {
         let stack = &self.stack;
         if let Some(current_context) = stack.last() {
-            if let Some(ir_block) = &current_context.ir_block {
-                Rc::clone(&ir_block.inst_list)
+            if let Some(basic_block) = &current_context.basic_block {
+                Rc::clone(&basic_block.inst_list)
             } else {
-                panic!("You couldn't call this func when inst_list is None");
+                panic!("You couldn't call this func when current basic_block is None");
             }
         } else {
             panic!("No context available to get instruction list");
@@ -189,13 +198,13 @@ impl ContextStack {
         }
     }
 
-    pub fn get_current_ir_block(&self) -> Rc<IRBlock> {
+    pub fn get_current_basic_block(&self) -> Rc<BasicBlock> {
         let stack = &self.stack;
         if let Some(current_context) = stack.last() {
-            if let Some(ir_block) = &current_context.ir_block {
-                Rc::clone(ir_block)
+            if let Some(basic_block) = &current_context.basic_block {
+                Rc::clone(basic_block)
             } else {
-                panic!("You couldn't call this func when ir_block is None");
+                panic!("You couldn't call this func when basic_block is None");
             }
         } else {
             panic!("No context available to get current IR block");

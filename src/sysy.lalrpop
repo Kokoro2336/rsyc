@@ -43,11 +43,45 @@ BlockItem: BlockItem = {
 };
 
 Stmt: Stmt = {
-  <l_val: LVal> "=" <exp: Exp> ";" => Stmt::RegularStmt { l_val, exp },
-  <block: Block> => Stmt::Block { block: Box::new(block) },
-  <exp: Exp> ";" => Stmt::RawExp { exp: Some(exp) },
-  ";" => Stmt::RawExp { exp: None },
-  "return" <exp: Exp> ";" => Stmt::ReturnStmt { exp }
+  <open_stmt: OpenStmt> => Stmt::OpenStmt { open_stmt: Box::new(open_stmt) },
+  <close_stmt: CloseStmt> => Stmt::CloseStmt { close_stmt: Box::new(close_stmt) },
+}
+
+CloseStmt: CloseStmt = {
+  <simple_stmt: SimpleStmt> => CloseStmt::SimpleStmt { simple_stmt },
+  "if" "(" <condition: Exp> ")" <then_stmt: CloseStmt> "else" <else_stmt: CloseStmt> => CloseStmt::CloseCond {
+      condition,
+      then_stmt: Box::new(then_stmt),
+      else_stmt: Box::new(else_stmt),
+  },
+  "while" "(" <condition: Exp> ")" <body_stmt: CloseStmt> => CloseStmt::CloseWhile {
+      condition,
+      body_stmt: Box::new(body_stmt),
+  },
+};
+
+OpenStmt: OpenStmt = {
+  "if" "(" <condition: Exp> ")" <then_stmt: CloseStmt> "else" <else_stmt: OpenStmt> => OpenStmt::OpenCond {
+      condition,
+      then_stmt: Box::new(then_stmt),
+      else_stmt: Box::new(else_stmt),
+  },
+  "if" "(" <condition: Exp> ")" <then_stmt: Stmt> => OpenStmt::SingleCond {
+      condition,
+      then_stmt: Box::new(then_stmt),
+  },
+  "while" "(" <condition: Exp> ")" <body_stmt: OpenStmt> => OpenStmt::OpenWhile {
+      condition,
+      body_stmt: Box::new(body_stmt),
+  },
+};
+
+SimpleStmt: SimpleStmt = {
+  <l_val: LVal> "=" <exp: Exp> ";" => SimpleStmt::RegularStmt { l_val, exp },
+  <block: Block> => SimpleStmt::Block { block: Box::new(block) },
+  <exp: Exp> ";" => SimpleStmt::RawExp { exp: Some(exp) },
+  ";" => SimpleStmt::RawExp { exp: None },
+  "return" <exp: Exp> ";" => SimpleStmt::ReturnStmt { exp }
 };
 
 LVal: LVal = {

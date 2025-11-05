@@ -2,7 +2,7 @@ use crate::ast::exp::{Exp, Expression, IRObj};
 use crate::config::config::BType;
 use crate::config::config::CONTEXT_STACK;
 use crate::koopa_ir::config::{KoopaOpCode, PTR_ID_ALLOCATOR};
-use crate::koopa_ir::koopa_ir::{insert_instruction, InstData, Operand};
+use crate::koopa_ir::koopa_ir::{insert_ir, InstData, Operand};
 
 use std::vec::Vec;
 
@@ -143,7 +143,7 @@ impl Declaration for VarDef {
 
         let pointer_id = PTR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc());
         // whatever the init_val is, we need to allocate space for the variable
-        insert_instruction(InstData::new(
+        insert_ir(InstData::new(
             BType::Int,
             IRObj::Pointer {
                 initialized: self.init_val.is_some(),
@@ -157,7 +157,7 @@ impl Declaration for VarDef {
             let parse_result = init_val.parse();
             // we don't need to store temp var to var_table here for it'll be removed soon after STORE
             if let IRObj::Const(_) | IRObj::InstId(_) = parse_result {
-                insert_instruction(InstData::new(
+                insert_ir(InstData::new(
                     BType::Void,
                     IRObj::None,
                     KoopaOpCode::STORE,

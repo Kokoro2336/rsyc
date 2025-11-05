@@ -2,7 +2,7 @@ use crate::asm::config::{RVRegCode, RVREG_ALLOCATOR};
 use crate::ast::exp::*;
 use crate::config::config::BType;
 use crate::config::config::CONTEXT_STACK;
-use crate::koopa_ir::config::KoopaOpCode;
+use crate::koopa_ir::config::{KoopaOpCode, BLOCK_ID_ALLOCATOR};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -35,9 +35,9 @@ impl Program {
 impl std::fmt::Display for Program {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for func in &self.funcs {
-            CONTEXT_STACK.with(|stack| stack.borrow_mut().enter_func_scope(Rc::clone(func)));
+            CONTEXT_STACK.with(|stack| stack.borrow_mut().enter_func(Rc::clone(func)));
             writeln!(f, "{}", func)?;
-            CONTEXT_STACK.with(|stack| stack.borrow_mut().exit_scope());
+            CONTEXT_STACK.with(|stack| stack.borrow_mut().exit_func());
         }
         Ok(())
     }
@@ -116,6 +116,15 @@ impl DataFlowGraph {
             panic!("Instruction not found for inst_id {:?}", inst_id);
         }
     }
+
+    // api to modify operands of an inst.
+    pub fn append_operands(&mut self, inst_id: InstId, operands: Vec<Operand>) {
+        if let Some(inst) = self.inst_map.get_mut(&inst_id) {
+            inst.operands.extend(operands);
+        } else {
+            panic!("Instruction not found for inst_id {:?}", inst_id);
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -141,7 +150,7 @@ pub struct Func {
     pub func_type: BType,
     pub params: Vec<Param>,
     pub dfg: Rc<RefCell<DataFlowGraph>>,
-    pub ir_blocks: Rc<RefCell<Vec<Rc<IRBlock>>>>,
+    pub basic_blocks: Rc<RefCell<Vec<Rc<BasicBlock>>>>,
 }
 
 impl std::fmt::Display for Func {
@@ -153,10 +162,9 @@ impl std::fmt::Display for Func {
             self.get_params_str(),
             self.func_type
         )?;
-        for block in &*self.ir_blocks.borrow() {
-            CONTEXT_STACK.with(|stack| stack.borrow_mut().enter_block_scope(Rc::clone(block)));
+        for block in &*self.basic_blocks.borrow() {
+            CONTEXT_STACK.with(|stack| stack.borrow_mut().enter_block(Rc::clone(block)));
             writeln!(f, "{}", block)?;
-            CONTEXT_STACK.with(|stack| stack.borrow_mut().exit_scope());
         }
 
         writeln!(f, "}}");
@@ -171,12 +179,51 @@ impl Func {
             func_type,
             params,
             dfg: Rc::new(RefCell::new(DataFlowGraph::new())),
-            ir_blocks: Rc::new(RefCell::new(vec![])),
+            basic_blocks: Rc::new(RefCell::new(vec![])),
         }
     }
 
-    pub fn push_ir_block(&mut self, block: Rc<IRBlock>) {
-        self.ir_blocks.borrow_mut().push(Rc::clone(&block));
+    pub fn push_basic_block(&self, block: Rc<BasicBlock>) {
+        self.basic_blocks.borrow_mut().push(Rc::clone(&block));
+    }
+
+    pub fn get_asm_label(&self, block_id: u32) -> String {
+        if let Some(pos) = self
+            .basic_blocks
+            .borrow()
+            .iter()
+            .position(|block| block.get_block_id() == block_id)
+        {
+            if pos == 0 {
+                self.name.clone()
+            } else {
+                format!(".block_{}", block_id)
+            }
+        } else {
+            panic!("Block with id {} doesn't exist.", block_id)
+        }
+    }
+
+    pub fn get_block(&self, block_id: u32) -> Rc<BasicBlock> {
+        if let Some(basic_block) = self
+            .basic_blocks
+            .borrow()
+            .iter()
+            .find(|block| block.get_block_id() == block_id)
+        {
+            Rc::clone(&basic_block)
+        } else {
+            panic!("Cannot find block with id {}", block_id);
+        }
+    }
+
+    pub fn remove_block(&mut self, block_id: u32) {
+        let mut blocks = self.basic_blocks.borrow_mut();
+        if let Some(pos) = blocks.iter().position(|b| b.block_id == block_id) {
+            blocks.remove(pos);
+        } else {
+            panic!("Basic block with id {} not found", block_id);
+        }
     }
 
     pub fn get_params_str(&self) -> String {
@@ -186,6 +233,21 @@ impl Func {
             .collect::<Vec<_>>()
             .join(", ")
     }
+
+    pub fn change_block_type(&self, block_id: u32, new_type: BasicBlockType) {
+        let blocks = self.basic_blocks.borrow_mut();
+        if let Some(block) = blocks.iter().find(|b| b.block_id == block_id) {
+            let mut block_type = block.block_type.borrow_mut();
+            *block_type = new_type;
+        } else {
+            panic!("Basic block with id {} not found", block_id);
+        }
+    }
+
+    pub fn has_block(&self, block_id: u32) -> bool {
+        let blocks = self.basic_blocks.borrow();
+        blocks.iter().any(|b| b.block_id == block_id)
+    }
 }
 
 #[derive(Clone)]
@@ -194,22 +256,43 @@ pub struct Param {
     pub param_type: BType,
 }
 
+#[derive(Debug, Clone)]
+pub enum BasicBlockType {
+    Normal,
+    If,
+    Else,
+    WhileEntry,
+    WhileBody,
+}
+
 #[derive(Clone)]
-pub struct IRBlock {
+pub struct BasicBlock {
+    pub block_id: u32,
+    pub block_type: RefCell<BasicBlockType>,
     pub inst_list: Rc<RefCell<Vec<InstId>>>,
 }
 
-impl IRBlock {
-    pub fn new() -> Self {
+impl BasicBlock {
+    pub fn new(block_type: BasicBlockType) -> Self {
         Self {
+            block_id: BLOCK_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
+            block_type: RefCell::new(block_type),
             inst_list: Rc::new(RefCell::new(vec![])),
         }
     }
+
+    pub fn get_block_id(&self) -> u32 {
+        self.block_id
+    }
+
+    pub fn get_block_type(&self) -> BasicBlockType {
+        self.block_type.borrow().clone()
+    }
 }
 
-impl std::fmt::Display for IRBlock {
+impl std::fmt::Display for BasicBlock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "%entry: ")?;
+        writeln!(f, "%block_{}: ", self.block_id)?;
 
         let dfg = CONTEXT_STACK.with(|stack| stack.borrow().get_current_dfg());
         let dfg_borrow = dfg.borrow();
@@ -224,7 +307,11 @@ impl std::fmt::Display for IRBlock {
                 _ => {
                     if let IRObj::InstId(_) = inst_data.ir_obj {
                         writeln!(f, "  %{} = {}", inst, inst_data)?;
-                    } else if let IRObj::Pointer { initialized:_, pointer_id } = inst_data.ir_obj {
+                    } else if let IRObj::Pointer {
+                        initialized: _,
+                        pointer_id,
+                    } = inst_data.ir_obj
+                    {
                         writeln!(f, "  @{} = {}", pointer_id, inst_data)?;
                     } else {
                         writeln!(f, "  {}", inst_data)?;
@@ -246,6 +333,7 @@ pub enum Operand {
     Const(i32),     // maybe the operand is a constant value
     BType(BType),   // maybe the operand is a type
     Pointer(u32),
+    BlockId(u32), // block label(using id to represent)
     None,
 }
 
@@ -271,6 +359,7 @@ impl Operand {
             Operand::Const(c) => format!("{}", c),
             Operand::BType(b_type) => format!("{}", b_type),
             Operand::Pointer(pointer) => format!("@{}", pointer),
+            Operand::BlockId(block_id) => format!("%block_{}", block_id),
             Operand::None => "".to_string(),
         }
     }
@@ -331,7 +420,8 @@ impl std::fmt::Display for InstData {
     }
 }
 
-pub fn insert_instruction(inst_data: InstData) -> IRObj {
+/// key function to insert instruction into current basic block and DFG
+pub fn insert_ir(inst_data: InstData) -> IRObj {
     let dfg = CONTEXT_STACK.with(|stack| stack.borrow().get_current_dfg());
     let mut dfg_mut = dfg.borrow_mut();
     let inst_list = CONTEXT_STACK.with(|stack| stack.borrow().get_current_inst_list());

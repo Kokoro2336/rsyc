@@ -4,7 +4,7 @@ use crate::config::config::CONTEXT_STACK;
 
 use crate::config::config::BType;
 use crate::koopa_ir::config::KoopaOpCode;
-use crate::koopa_ir::koopa_ir::{insert_instruction, InstData, InstId};
+use crate::koopa_ir::koopa_ir::{insert_ir, InstData, InstId};
 
 #[derive(Debug, Clone)]
 pub enum IRObj {
@@ -93,13 +93,20 @@ impl Expression for LOrExp {
                 land_exp,
             } => {
                 let left = lor_exp.parse_var_exp();
+                // perform short-circuit evaluation for logical OR
+                if let IRObj::Const(v) = &left {
+                    if *v != 0 {
+                        return IRObj::Const(1);
+                    }
+                }
+
                 let right = land_exp.parse_var_exp();
 
                 let koopa_op = match lor_op {
                     LOrOp::Or => KoopaOpCode::OR,
                 };
 
-                insert_instruction(InstData::new(
+                insert_ir(InstData::new(
                     BType::Int,
                     IRObj::InstId(CONTEXT_STACK.with(|stack| {
                         stack.borrow().get_current_dfg().borrow().get_next_inst_id()
@@ -174,13 +181,20 @@ impl Expression for LAndExp {
                 eq_exp,
             } => {
                 let left = land_exp.parse_var_exp();
+                // perform short-circuit evaluation for logical AND
+                if let IRObj::Const(v) = &left {
+                    if *v == 0 {
+                        return IRObj::Const(0);
+                    }
+                }
+
                 let right = eq_exp.parse_var_exp();
 
                 let koopa_op = match land_op {
                     LAndOp::And => KoopaOpCode::AND,
                 };
 
-                insert_instruction(InstData::new(
+                insert_ir(InstData::new(
                     BType::Int,
                     IRObj::InstId(CONTEXT_STACK.with(|stack| {
                         stack.borrow().get_current_dfg().borrow().get_next_inst_id()
@@ -252,7 +266,7 @@ impl Expression for EqExp {
                     EqOp::Ne => KoopaOpCode::NE,
                 };
 
-                insert_instruction(InstData::new(
+                insert_ir(InstData::new(
                     BType::Int,
                     IRObj::InstId(CONTEXT_STACK.with(|stack| {
                         stack.borrow().get_current_dfg().borrow().get_next_inst_id()
@@ -330,7 +344,7 @@ impl Expression for RelExp {
                     RelOp::Ge => KoopaOpCode::GE,
                 };
 
-                insert_instruction(InstData::new(
+                insert_ir(InstData::new(
                     BType::Int,
                     IRObj::InstId(CONTEXT_STACK.with(|stack| {
                         stack.borrow().get_current_dfg().borrow().get_next_inst_id()
@@ -405,7 +419,7 @@ impl Expression for UnaryExp {
 
                 match unary_op {
                     UnaryOp::Plus => parse_result,
-                    UnaryOp::Minus | UnaryOp::Not => insert_instruction(InstData::new(
+                    UnaryOp::Minus | UnaryOp::Not => insert_ir(InstData::new(
                         BType::Int,
                         IRObj::InstId(CONTEXT_STACK.with(|stack| {
                             stack.borrow().get_current_dfg().borrow().get_next_inst_id()
@@ -480,7 +494,7 @@ impl Expression for MulExp {
                     MulOp::Mod => KoopaOpCode::MOD,
                 };
 
-                insert_instruction(InstData::new(
+                insert_ir(InstData::new(
                     BType::Int,
                     IRObj::InstId(CONTEXT_STACK.with(|stack| {
                         stack.borrow().get_current_dfg().borrow().get_next_inst_id()
@@ -557,7 +571,7 @@ impl Expression for AddExp {
                     AddOp::Sub => KoopaOpCode::SUB,
                 };
 
-                insert_instruction(InstData::new(
+                insert_ir(InstData::new(
                     BType::Int,
                     IRObj::InstId(CONTEXT_STACK.with(|stack| {
                         stack.borrow().get_current_dfg().borrow().get_next_inst_id()
@@ -628,7 +642,7 @@ impl Expression for PrimaryExp {
                         }
 
                         // if it's a variable stored in memory, load first and return inst_id.
-                        insert_instruction(InstData::new(
+                        insert_ir(InstData::new(
                             BType::Int,
                             IRObj::InstId(CONTEXT_STACK.with(|stack| {
                                 stack.borrow().get_current_dfg().borrow().get_next_inst_id()

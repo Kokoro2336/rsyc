@@ -115,47 +115,49 @@ pub enum RVRegCode {
 }
 
 #[derive(Debug, Clone)]
-pub enum RegAllocType {
-    Temp(RVRegCode), // reg temporarily allocated, often for asms transformed from the same IR.
-    Perm(RVRegCode), // reg permanently allocated, often for the reg eventually used by the whole IR.
-
+pub enum RVOperandType {
+    Temp(RVRegCode),                            // reg temporarily allocated, often for asms transformed from the same IR.
+    Perm(RVRegCode),                            // reg permanently allocated, often for the reg eventually used by the whole IR.
+    Label(String),                              // label for branch/jump
     MemWithReg { offset: u32, reg: RVRegCode }, // memory location in stack frame
     None,                                       // no reg allocated
 }
 
-impl std::fmt::Display for RegAllocType {
+impl std::fmt::Display for RVOperandType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RegAllocType::Temp(reg) => write!(f, "{}", reg),
-            RegAllocType::Perm(reg) => write!(f, "{}", reg),
-            RegAllocType::MemWithReg { offset, reg } => {
+            RVOperandType::Temp(reg) => write!(f, "{}", reg),
+            RVOperandType::Perm(reg) => write!(f, "{}", reg),
+            RVOperandType::MemWithReg { offset, reg } => {
                 write!(f, "{}({})", offset, reg)
             }
-            RegAllocType::None => write!(f, ""),
+            RVOperandType::Label(label) => write!(f, "{}", label),
+            RVOperandType::None => write!(f, ""),
         }
     }
 }
 
-impl RegAllocType {
+impl RVOperandType {
     pub fn get_reg(&self) -> RVRegCode {
         match self {
-            RegAllocType::Temp(reg) => *reg,
-            RegAllocType::Perm(reg) => *reg,
-            RegAllocType::MemWithReg { reg, .. } => *reg,
-            RegAllocType::None => panic!("No register allocated!"),
+            RVOperandType::Temp(reg) => *reg,
+            RVOperandType::Perm(reg) => *reg,
+            RVOperandType::MemWithReg { reg, .. } => *reg,
+            RVOperandType::Label(_) => panic!("Label type has no register!"),
+            RVOperandType::None => panic!("No register allocated!"),
         }
     }
 
     pub fn get_offset(&self) -> u32 {
         match self {
-            RegAllocType::MemWithReg { offset, .. } => *offset,
+            RVOperandType::MemWithReg { offset, .. } => *offset,
             _ => panic!("Not a MemWithReg type!"),
         }
     }
 
     /// this function would only free temporary registers.
     pub fn free_temp(&self) {
-        if let RegAllocType::Temp(reg) = self {
+        if let RVOperandType::Temp(reg) = self {
             RVREG_ALLOCATOR.with(|allocator| allocator.borrow_mut().free_reg(*reg));
         }
     }
@@ -195,21 +197,21 @@ impl RVRegAllocator {
         self.map[reg as usize] = inst_id;
     }
 
-    pub fn find_and_occupy_temp_reg(&mut self, inst_id: u32) -> RegAllocType {
+    pub fn find_and_occupy_temp_reg(&mut self, inst_id: u32) -> RVOperandType {
         if let Some(reg) = self.find_free_reg() {
             self.occupy_reg(reg, inst_id);
-            RegAllocType::Temp(reg)
+            RVOperandType::Temp(reg)
         } else {
-            RegAllocType::None
+            RVOperandType::None
         }
     }
 
-    pub fn find_and_occupy_perm_reg(&mut self, inst_id: u32) -> RegAllocType {
+    pub fn find_and_occupy_perm_reg(&mut self, inst_id: u32) -> RVOperandType {
         if let Some(reg) = self.find_free_reg() {
             self.occupy_reg(reg, inst_id);
-            RegAllocType::Perm(reg)
+            RVOperandType::Perm(reg)
         } else {
-            RegAllocType::None
+            RVOperandType::None
         }
     }
 
@@ -313,29 +315,32 @@ impl StackFrameManager {
         (offset, size)
     }
 
-    /// this would return RegAllocType with eventual offset in stack frame
-    pub fn alloc_named_var_wrapped(&mut self, name: String, typ: BType) -> RegAllocType {
+    /// this would return RVOperandType with eventual offset in stack frame
+    pub fn alloc_named_var_wrapped(&mut self, name: String, typ: BType) -> RVOperandType {
         let (offset, _) = self.alloc_var(name, typ);
-        RegAllocType::MemWithReg {
+        RVOperandType::MemWithReg {
             offset,
             reg: RVRegCode::SP,
         }
     }
 
     /// often for temporary variables without name
-    pub fn alloc_anonymous_var_wrapped(&mut self, typ: BType) -> RegAllocType {
+    pub fn alloc_anonymous_var_wrapped(&mut self, typ: BType) -> RVOperandType {
         let (offset, _) = self.alloc_var("".to_string(), typ);
-        RegAllocType::MemWithReg {
+        RVOperandType::MemWithReg {
             offset,
             reg: RVRegCode::SP,
         }
     }
 
-    pub fn get_named_var_wrapped(&self, name: String) -> RegAllocType {
+    pub fn get_named_var_wrapped(&self, name: String) -> RVOperandType {
         let frame = self.frames.last().unwrap();
-        let (offset, _) = frame.var_map.get(&name).cloned().unwrap();
+        let (offset, _) = frame.var_map.get(&name).cloned().unwrap_or_else(|| panic!(
+            "Variable {} not found in current stack frame!",
+            name
+        ));
 
-        RegAllocType::MemWithReg {
+        RVOperandType::MemWithReg {
             offset,
             reg: RVRegCode::SP,
         }
@@ -345,7 +350,6 @@ impl StackFrameManager {
 thread_local! {
     /// this array records the occupation status of each register.
     /// each item means the inst id that occupies this register.
-
     pub static RVREG_ALLOCATOR: RefCell<RVRegAllocator> = RefCell::new(RVRegAllocator::new());
     pub static STK_FRM_MANAGER: RefCell<StackFrameManager> = RefCell::new(StackFrameManager::new());
 }

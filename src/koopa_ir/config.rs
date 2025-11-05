@@ -2,7 +2,9 @@ use std::cell::RefCell;
 
 thread_local! {
     // initialize pointer id allocator
-    pub static PTR_ID_ALLOCATOR: RefCell<PointerIdAllocator> = RefCell::new(PointerIdAllocator::new());
+    pub static PTR_ID_ALLOCATOR: RefCell<IdAllocator> = RefCell::new(IdAllocator::new());
+    // initialize koopa ir block id allocator
+    pub static BLOCK_ID_ALLOCATOR: RefCell<IdAllocator> = RefCell::new(IdAllocator::new());
 }
 
 #[derive(Debug, Clone)]
@@ -27,6 +29,8 @@ pub enum KoopaOpCode {
     STORE,
     LOAD,
     ALLOC, // store, load & ALLOC
+    BR,
+    JUMP,
     RET,
 }
 
@@ -53,6 +57,8 @@ impl std::fmt::Display for KoopaOpCode {
             KoopaOpCode::STORE => write!(f, "store"),
             KoopaOpCode::LOAD => write!(f, "load"),
             KoopaOpCode::ALLOC => write!(f, "alloc"),
+            KoopaOpCode::BR => write!(f, "br"),
+            KoopaOpCode::JUMP => write!(f, "jump"),
             KoopaOpCode::RET => write!(f, "ret"),
         }
     }
@@ -78,29 +84,33 @@ impl KoopaOpCode {
             | KoopaOpCode::XOR
             | KoopaOpCode::SHL
             | KoopaOpCode::SHR
-            | KoopaOpCode::SAR 
-            | KoopaOpCode::LOAD 
-            | KoopaOpCode:: ALLOC => true,
+            | KoopaOpCode::SAR
+            | KoopaOpCode::LOAD
+            | KoopaOpCode::ALLOC => true,
 
             // These opcodes do not produce a return value
-            KoopaOpCode::STORE | KoopaOpCode::RET => false,
+            KoopaOpCode::STORE | KoopaOpCode::RET | KoopaOpCode::BR | KoopaOpCode::JUMP => false,
         }
     }
 }
 
 #[derive(Debug)]
-pub struct PointerIdAllocator {
+pub struct IdAllocator {
     current_id: u32,
 }
 
-impl PointerIdAllocator {
+impl IdAllocator {
     pub fn new() -> Self {
-        PointerIdAllocator { current_id: 0 }
+        IdAllocator { current_id: 0 }
     }
 
     pub fn alloc(&mut self) -> u32 {
         let current_id = self.current_id;
         self.current_id += 1;
         current_id
+    }
+
+    pub fn get_next_id(&self) -> u32 {
+        self.current_id
     }
 }

@@ -1,7 +1,7 @@
 use crate::ast::decl::Decl;
 use crate::ast::stmt::{Statement, Stmt};
 use crate::config::config::{BType, CONTEXT_STACK};
-use crate::koopa_ir::koopa_ir::{Func, IRBlock, Program};
+use crate::koopa_ir::koopa_ir::{BasicBlock, BasicBlockType, Func, Program};
 
 use std::rc::Rc;
 
@@ -38,18 +38,21 @@ impl FuncDef {
         let func_type = &self.func_type;
         let func_name = self.ident.clone();
 
-        let mut func = Rc::new(Func::new(func_name, func_type.clone(), vec![]));
+        let func = Rc::new(Func::new(func_name, func_type.clone(), vec![]));
 
-        CONTEXT_STACK.with(|stack| stack.borrow_mut().enter_func_scope(Rc::clone(&func)));
+        let basic_block = Rc::new(BasicBlock::new(BasicBlockType::Normal));
+        CONTEXT_STACK.with(|stack| {
+            let mut stack_mut = stack.borrow_mut();
+            stack_mut.enter_func(Rc::clone(&func));
+            stack_mut.enter_block(Rc::clone(&basic_block));
+            stack_mut.get_current_func().push_basic_block(basic_block);
+        });
 
-        {
-            let ir_block = Rc::new(IRBlock::new());
-            self.block.parse(Rc::clone(&ir_block));
-            let func_mut = Rc::get_mut(&mut func).unwrap();
-            func_mut.push_ir_block(ir_block);
-        }
+        self.block.parse();
 
-        CONTEXT_STACK.with(|stack| stack.borrow_mut().exit_scope());
+        CONTEXT_STACK.with(|stack| {
+            stack.borrow_mut().exit_func();
+        });
 
         func
     }
@@ -61,14 +64,10 @@ pub struct Block {
 }
 
 impl Block {
-    pub fn parse(&self, ir_block: Rc<IRBlock>) {
-        CONTEXT_STACK.with(|stack| stack.borrow_mut().enter_block_scope(ir_block));
-
+    pub fn parse(&self) {
         for item in &self.block_items {
             item.parse();
         }
-
-        CONTEXT_STACK.with(|stack| stack.borrow_mut().exit_scope());
     }
 }
 

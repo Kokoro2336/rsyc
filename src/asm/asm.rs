@@ -1,4 +1,4 @@
-use crate::asm::config::{RVOpCode, RVRegCode, RVREG_ALLOCATOR, RegAllocType, STK_FRM_MANAGER};
+use crate::asm::config::{RVOpCode, RVRegCode, RVREG_ALLOCATOR, RVOperandType, STK_FRM_MANAGER};
 use crate::koopa_ir::config::KoopaOpCode;
 use crate::koopa_ir::koopa_ir::{Func, InstData, Operand, Program};
 use crate::config::config::CONTEXT_STACK;
@@ -14,19 +14,21 @@ impl std::fmt::Display for Asm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // data section
         writeln!(f, ".data")?;
+        // declaration for global values
         for val in &self.global_vals {
-            writeln!(f, ".global {}", val)?;
+            writeln!(f, ".globl {}", val)?;
         }
 
+        // assignment for global values
         for val in &self.global_vals {
             writeln!(f, "{}", val)?;
         }
 
         // text section
         writeln!(f, ".text")?;
-        // print the global symbols
+        // print the global func symbols
         for block in &self.blocks {
-            writeln!(f, ".global {}", block.label)?;
+            writeln!(f, ".globl {}", block.label)?;
         }
 
         // print the blocks
@@ -56,21 +58,32 @@ impl Asm {
 
         // add blocks
         for func in &program.funcs {
-            CONTEXT_STACK.with(|stack| {
-                let mut stack = stack.borrow_mut();
-                stack.enter_func_scope(Rc::clone(&func));
+            STK_FRM_MANAGER.with(|manager| {
+                let mut manager = manager.borrow_mut();
+                manager.prologue(func);
             });
 
-            asm.blocks.push(AsmBlock::from(&func));
+            CONTEXT_STACK.with(|stack| {
+                let mut stack = stack.borrow_mut();
+                stack.enter_func(Rc::clone(&func));
+            });
+
+            asm.blocks.extend(AsmBlock::from(&func));
 
             CONTEXT_STACK.with(|stack| {
                 let mut stack = stack.borrow_mut();
-                stack.exit_scope();
+                stack.exit_func();
+            });
+
+            STK_FRM_MANAGER.with(|manager| {
+                let mut manager = manager.borrow_mut();
+                manager.epilogue();
             });
         }
 
         Ok(asm)
     }
+
 }
 
 pub struct AsmGlobalVal {
@@ -115,19 +128,51 @@ impl AsmBlock {
         }
     }
 
-    pub fn from(func: &Func) -> Self {
-        let mut asm_block = AsmBlock::new(func.name.clone());
+    pub fn from(func: &Func) -> Vec<Self> {
+        let mut asm_blocks: Vec<AsmBlock> = Vec::new();
 
-        // TODO: for now, we don't need to process funct_type and params
+        // process basic blocks
+        for (idx, basic_block) in func.basic_blocks.borrow().iter().enumerate() {
+            let mut asm_block = AsmBlock::new(func.get_asm_label(basic_block.get_block_id()));
 
-        // add prologue
-        asm_block.prologue(func);
+            /// 1. whether to allocate return address
+            /// 2. how much space to allocate for callee-saved registers
+            /// 3. how much space to allocate for local variables
+            /// 4. whether to allocate space for function calling.
+            if idx == 0 {
+                let mut asm_insts: Vec<AsmInst> = vec![];
 
-        // add inst
-        for ir_block in &*func.ir_blocks.borrow() {
+                // allocate stack frame
+                asm_insts.push(AsmInst {
+                    opcode: RVOpCode::ADDI,
+                    rd: Some(RVOperandType::Temp(RVRegCode::SP)),
+                    rs1: Some(RVOperandType::Temp(RVRegCode::SP)),
+                    rs2: None,
+                    imm: Some(-STK_FRM_MANAGER.with(|manager| manager.borrow().get_size() as i32)),
+                });
+
+                // store return address
+                if STK_FRM_MANAGER.with(|manager| manager.borrow().is_callee()) {
+                    asm_insts.push(AsmInst {
+                        opcode: RVOpCode::SW,
+                        rd: None,
+                        rs1: Some(RVOperandType::MemWithReg {
+                            reg: RVRegCode::SP,
+                            offset: 0,
+                        }),
+                        rs2: None,
+                        imm: None,
+                    });
+                }
+
+                asm_block.insts.extend(asm_insts);
+            }
+
+            // TODO: for now, we don't need to process funct_type and params
+
             CONTEXT_STACK.with(|stack| {
                 let mut stack = stack.borrow_mut();
-                stack.enter_block_scope(Rc::clone(ir_block));
+                stack.enter_block(Rc::clone(basic_block));
             });
 
             for inst in CONTEXT_STACK.with(|stack| {
@@ -147,57 +192,10 @@ impl AsmBlock {
                 asm_block.insts.extend(asm_insts);
             }
 
-            CONTEXT_STACK.with(|stack| {
-                let mut stack = stack.borrow_mut();
-                stack.exit_scope();
-            });
+            asm_blocks.push(asm_block);
         }
 
-        STK_FRM_MANAGER.with(|manager| {
-            let mut manager = manager.borrow_mut();
-            manager.epilogue();
-        });
-
-        asm_block
-    }
-
-    /// this function manage stack frame's layout, including:
-    /// 1. whether to allocate return address
-    /// 2. how much space to allocate for callee-saved registers
-    /// 3. how much space to allocate for local variables
-    /// 4. whether to allocate space for function calling.
-    pub fn prologue(&mut self, func: &Func) {
-        STK_FRM_MANAGER.with(|manager| {
-            let mut manager = manager.borrow_mut();
-            manager.prologue(func);
-        });
-
-        let mut asm_insts: Vec<AsmInst> = vec![];
-
-        // allocate stack frame
-        asm_insts.push(AsmInst {
-            opcode: RVOpCode::ADDI,
-            rd: Some(RegAllocType::Temp(RVRegCode::SP)),
-            rs1: Some(RegAllocType::Temp(RVRegCode::SP)),
-            rs2: None,
-            imm: Some(-STK_FRM_MANAGER.with(|manager| manager.borrow().get_size() as i32)),
-        });
-
-        // store return address
-        if STK_FRM_MANAGER.with(|manager| manager.borrow().is_callee()) {
-            asm_insts.push(AsmInst {
-                opcode: RVOpCode::SW,
-                rd: None,
-                rs1: Some(RegAllocType::MemWithReg {
-                    reg: RVRegCode::SP,
-                    offset: 0, // Default offset value added
-                }),
-                rs2: None,
-                imm: None,
-            });
-        }
-
-        self.insts.extend(asm_insts);
+        asm_blocks
     }
 
 }
@@ -205,9 +203,9 @@ impl AsmBlock {
 #[derive(Clone)]
 pub struct AsmInst {
     pub opcode: RVOpCode,
-    pub rd: Option<RegAllocType>,
-    pub rs1: Option<RegAllocType>,
-    pub rs2: Option<RegAllocType>,
+    pub rd: Option<RVOperandType>,
+    pub rs1: Option<RVOperandType>,
+    pub rs2: Option<RVOperandType>,
     pub imm: Option<i32>,
 }
 
@@ -221,6 +219,14 @@ impl std::fmt::Display for AsmInst {
 
             RVOpCode::SW => {
                 write!(f, " {}, {}", &self.rs2.as_ref().unwrap(), &self.rs1.as_ref().unwrap())?;
+            }
+
+            RVOpCode::BEQZ | RVOpCode::BNEZ => {
+                write!(f, " {}, {}", &self.rs1.as_ref().unwrap(), &self.rd.as_ref().unwrap())?;
+            }
+
+            RVOpCode::J => {
+                write!(f, " {}", &self.rd.as_ref().unwrap())?;
             }
 
             _ => {
@@ -260,15 +266,14 @@ impl AsmInst {
     ) -> Vec<Self> {
         let mut v = Vec::new();
 
-        let reg_used: RegAllocType = match inst_data.opcode {
+        let reg_used: RVOperandType = match inst_data.opcode {
             KoopaOpCode::EQ | KoopaOpCode::NE => {
                 let rs1 = process_op(&mut v, inst, inst_data.operands.first().unwrap());
                 let rs2 = process_op(&mut v, inst, inst_data.operands.get(1).unwrap());
 
-                // manually specify the type of anonymous var.
                 let rd1 = RVREG_ALLOCATOR.with(|allocator| allocator.borrow_mut().find_and_occupy_temp_reg(*inst));
                 v.push(AsmInst {
-                    opcode: RVOpCode::XOR, // for now we just use xor to represent eq
+                    opcode: RVOpCode::XOR,
                     rd: Some(rd1.clone()),
                     rs1: Some(rs1.clone()),
                     rs2: Some(rs2.clone()),
@@ -278,8 +283,8 @@ impl AsmInst {
                 let rd2 = RVREG_ALLOCATOR.with(|allocator| allocator.borrow_mut().find_and_occupy_temp_reg(*inst));
                 v.push(AsmInst {
                     opcode: match inst_data.opcode {
-                        KoopaOpCode::EQ => RVOpCode::SEQZ, // set if equal to zero
-                        KoopaOpCode::NE => RVOpCode::SNEZ, // set if not equal to zero
+                        KoopaOpCode::EQ => RVOpCode::SEQZ,
+                        KoopaOpCode::NE => RVOpCode::SNEZ,
                         _ => unreachable!(),
                     },
                     rd: Some(rd2.clone()),
@@ -289,7 +294,6 @@ impl AsmInst {
                 });
 
                 rs1.free_temp(); rs2.free_temp(); rd1.free_temp(); rd2.free_temp();
-                // save value to mem
                 v.push(AsmInst {
                     opcode: RVOpCode::SW,
                     rd: None,
@@ -297,8 +301,7 @@ impl AsmInst {
                     rs2: Some(rd2.clone()),
                     imm: None,
                 });
-                // Some(rd2)
-                RegAllocType::None
+                RVOperandType::None
             }
 
             KoopaOpCode::AND
@@ -346,7 +349,7 @@ impl AsmInst {
                     imm: None,
                 });
                 // Some(rd)
-                RegAllocType::None
+                RVOperandType::None
             }
 
             KoopaOpCode::ADD
@@ -408,13 +411,13 @@ impl AsmInst {
                     imm: None,
                 });
                 // Some(rd)
-                RegAllocType::None
+                RVOperandType::None
             }
 
             KoopaOpCode::ALLOC => {
                 // only alloc space for ALLOC inst
                 STK_FRM_MANAGER.with(|manager| manager.borrow_mut().alloc_named_var_wrapped(inst_data.ir_obj.to_string(), inst_data.typ.clone()));
-                RegAllocType::None
+                RVOperandType::None
             }
 
             KoopaOpCode::LOAD => {
@@ -437,7 +440,7 @@ impl AsmInst {
                     rs2: Some(rs1.clone()),
                     imm: None,
                 });
-                RegAllocType::None
+                RVOperandType::None
             }
 
             KoopaOpCode::STORE => {
@@ -453,7 +456,46 @@ impl AsmInst {
                 });
 
                 rs1.free_temp(); rs2.free_temp();
-                RegAllocType::None
+                RVOperandType::None
+            }
+
+            KoopaOpCode::BR => {
+                let op_reg = process_op(&mut v, inst, inst_data.operands.first().unwrap());
+                let label1 = process_op(&mut v, inst, inst_data.operands.get(1).unwrap());
+                let label2 = process_op(&mut v, inst, inst_data.operands.get(2).unwrap());
+
+                v.push(AsmInst {
+                    opcode: RVOpCode::BNEZ,
+                    rd: Some(label1),
+                    rs1: Some(op_reg.clone()),
+                    rs2: None,
+                    imm: None,
+                });
+
+                v.push(AsmInst {
+                    opcode: RVOpCode::J,
+                    rd: Some(label2),
+                    rs1: None,
+                    rs2: None,
+                    imm: None,
+                });
+
+                op_reg.free_temp();
+                RVOperandType::None
+            }
+
+            KoopaOpCode::JUMP => {
+                let label = process_op(&mut v, inst, inst_data.operands.first().unwrap());
+                
+                v.push(AsmInst {
+                    opcode: RVOpCode::J,
+                    rd: Some(label),
+                    rs1: None,
+                    rs2: None,
+                    imm: None,
+                });
+
+                RVOperandType::None
             }
 
             KoopaOpCode::RET => {
@@ -463,8 +505,8 @@ impl AsmInst {
                 // epilogue here
                 v.push(AsmInst {
                     opcode: RVOpCode::ADDI,
-                    rd: Some(RegAllocType::Temp(RVRegCode::SP)),
-                    rs1: Some(RegAllocType::Temp(RVRegCode::SP)),
+                    rd: Some(RVOperandType::Temp(RVRegCode::SP)),
+                    rs1: Some(RVOperandType::Temp(RVRegCode::SP)),
                     rs2: None,
                     imm: Some(STK_FRM_MANAGER.with(|manager| manager.borrow().get_size() as i32)),
                 });
@@ -478,12 +520,11 @@ impl AsmInst {
                 });
 
                 op_reg.free_temp();
-                RegAllocType::None
+                RVOperandType::None
             }
         };
 
-        // only permanently allocated regs are recorded in DFG
-        if let RegAllocType::Perm(reg) = reg_used {
+        if let RVOperandType::Perm(reg) = reg_used {
             CONTEXT_STACK.with(|stack| {
                 let stack = stack.borrow();
                 stack.get_current_dfg().borrow_mut().set_reg(inst, Some(reg));
@@ -497,39 +538,36 @@ fn process_op(
     v: &mut Vec<AsmInst>,
     current_inst_id: &u32,
     operand: &Operand,
-) -> RegAllocType {
-    let opcode = CONTEXT_STACK.with(|stack| 
+) -> RVOperandType {
+    let inst_data = CONTEXT_STACK.with(|stack| 
         stack
         .borrow()
         .get_current_dfg()
         .borrow()
-        .get_inst(current_inst_id)
-        .unwrap()
-        .opcode
-        .clone());
+        .get_inst(current_inst_id).unwrap().clone());
 
     match operand {
         Operand::Const(val) => {
             if *val == 0 {
-                return RegAllocType::Temp(RVRegCode::ZERO);
+                return RVOperandType::Temp(RVRegCode::ZERO);
             }
 
             // find a free temp reg
-            if let RegAllocType::Temp(temp_reg) = match opcode {
-                KoopaOpCode::RET => RegAllocType::Temp(RVRegCode::A0), // for return, we must use a0
+            if let RVOperandType::Temp(temp_reg) = match inst_data.opcode {
+                KoopaOpCode::RET => RVOperandType::Temp(RVRegCode::A0), // for return, we must use a0
                 _ => RVREG_ALLOCATOR.with(|allocator| allocator.borrow_mut().find_and_occupy_temp_reg(*current_inst_id))
             } {
                 // load imm into the free reg
                 let asm_inst = AsmInst {
                     opcode: RVOpCode::LI,
-                    rd: Some(RegAllocType::Temp(temp_reg)),
+                    rd: Some(RVOperandType::Temp(temp_reg)),
                     rs1: None,
                     rs2: None,
                     imm: Some(*val),
                 };
 
                 v.push(asm_inst);
-                RegAllocType::Temp(temp_reg)
+                RVOperandType::Temp(temp_reg)
             } else {
                 unimplemented!()
             }
@@ -537,8 +575,8 @@ fn process_op(
 
         Operand::InstId(inst_id) => {
             let mem_with_reg = STK_FRM_MANAGER.with(|manager| manager.borrow().get_named_var_wrapped(Operand::InstId(*inst_id).to_string()));
-            let rs1 = match opcode {
-                KoopaOpCode::RET => RegAllocType::Temp(RVRegCode::A0), // for return, we must use a0
+            let rs1 = match inst_data.opcode {
+                KoopaOpCode::RET => RVOperandType::Temp(RVRegCode::A0), // for return, we must use a0
                 _ => RVREG_ALLOCATOR.with(|allocator| allocator.borrow_mut().find_and_occupy_temp_reg(*inst_id))
             };
 
@@ -557,10 +595,17 @@ fn process_op(
             STK_FRM_MANAGER.with(|manager| manager.borrow().get_named_var_wrapped(Operand::Pointer(*pointer_id).to_string()))
         }
 
-        Operand::BType(_) => {
-            unreachable!()  // b_type as a operand would never reach here.
+        Operand::BlockId(block_id) => {
+            RVOperandType::Label(CONTEXT_STACK.with(|stack| {
+                let stack_borrow = stack.borrow();
+                stack_borrow.get_current_func().get_asm_label(*block_id) 
+            }))
         }
 
-        Operand::None => RegAllocType::None,
+        Operand::BType(_) => {
+            unreachable!("BType as an operand would never reach here.")
+        }
+
+        Operand::None => RVOperandType::None,
     }
 }
