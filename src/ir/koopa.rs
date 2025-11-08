@@ -338,8 +338,8 @@ impl std::fmt::Display for BasicBlock {
                     continue;
                 }
                 _ => {
-                    if let IRObj::IRVar(_) = inst_data.ir_obj {
-                        writeln!(f, "  %{} = {}", inst, inst_data)?;
+                    if let IRObj::IRVar(ir_var_id) = inst_data.ir_obj {
+                        writeln!(f, "  %{} = {}", ir_var_id, inst_data)?;
                     } else if let IRObj::Pointer {
                         initialized: _,
                         pointer_id,

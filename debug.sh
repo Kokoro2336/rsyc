@@ -16,6 +16,16 @@ gdb() {
     rust-gdb --args "$COMPILER" "-$MODE" "./testcases/lv${LEVEL}/${TEST}.c" -o "./testcases/lv${LEVEL}/${TEST}.out"
 }
 
+# Function for generate ir
+irgen() {
+    "$COMPILER" "-koopa" "./testcases/lv${LEVEL}/${TEST}.c" -o "./testcases/lv${LEVEL}/${TEST}.ir"
+}
+
+# Function for asm gen
+asmgen() {
+    "$COMPILER" "-riscv" "./testcases/lv${LEVEL}/${TEST}.c" -o "./testcases/lv${LEVEL}/${TEST}.out"
+}
+
 # Main script logic
 case "${1:-}" in
     "gdbserver")
@@ -24,8 +34,14 @@ case "${1:-}" in
     "gdb")
         gdb
         ;;
+    "irgen")
+        irgen
+        ;;
+    "asmgen")
+        asmgen
+        ;;
     *)
-        echo "Usage: $0 {gdbserver|gdb}"
+        echo "Usage: $0 {gdbserver|gdb|irgen|asmgen}"
         echo "Environment variables:"
         echo "  COMPILER: Path to compiler (default: ./target/debug/sysy_compiler)"
         echo "  MODE: Compiler mode (default: koopa)"

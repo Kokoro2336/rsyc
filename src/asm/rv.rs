@@ -530,7 +530,7 @@ impl AsmInst {
                 // if we need to load imm at return point, we must use a0 anyway.
                 let op_reg = process_op(inst_data.operands.first().unwrap());
 
-                // epilogue here
+                // epilogue should be binded with ret
                 ASM_CONTEXT.with(|asm_cxt| {
                     asm_cxt.borrow_mut().add_asm_inst(AsmInst {
                         opcode: RVOpCode::ADDI,
