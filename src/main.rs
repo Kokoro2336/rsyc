@@ -5,12 +5,12 @@ use std::io::Result;
 use std::io::Write;
 
 mod asm;
-mod ast;
-mod koopa_ir;
+mod sc;
 mod global;
+mod ir;
 mod util;
-use crate::asm::asm::Asm;
-use crate::koopa_ir::koopa_ir::{Program};
+use crate::asm::rv::Asm;
+use crate::ir::koopa::Program;
 
 // 引用 lalrpop 生成的解析器
 // 因为我们刚刚创建了 sysy.lalrpop, 所以模块名是 sysy
@@ -66,15 +66,13 @@ fn main() -> Result<()> {
     // 调用 lalrpop 生成的 parser 解析输入文件
     let result = sysy::CompUnitParser::new().parse(&input);
     let ast = match result {
-        Ok(ast_result) => {
-            ast_result
-        }
+        Ok(ast_result) => ast_result,
         Err(e) => {
             panic!("Error during parsing: {:?}", e);
         }
     };
 
-    let koopa_ir: Option<Program> = if cli.koopa || cli.riscv {
+    let koopa: Option<Program> = if cli.koopa || cli.riscv {
         // generate Koopa IR
         Some(ast.parse().unwrap_or_else(|e| {
             eprintln!("Error during AST to Koopa IR transformation: {:?}", e);
@@ -86,7 +84,7 @@ fn main() -> Result<()> {
 
     let asm: Option<Asm> = if cli.riscv {
         // generate RISC-V asm
-        Some(Asm::from(&koopa_ir.clone().unwrap()).unwrap_or_else(|e| {
+        Some(Asm::from(&koopa.clone().unwrap()).unwrap_or_else(|e| {
             eprintln!(
                 "Error during Koopa IR to RISC-V assembly transformation: {:?}",
                 e
@@ -99,11 +97,11 @@ fn main() -> Result<()> {
 
     // output AST
     println!("{:#?}", ast);
-    // output the koopa_ir
-    if let Some(koopa_ir) = koopa_ir {
+    // output the koopa
+    if let Some(koopa) = koopa {
         let mut f = std::fs::File::create(output.clone())?;
         // output the koopa ir
-        f.write_all(format!("{}", koopa_ir).as_bytes())?;
+        f.write_all(format!("{}", koopa).as_bytes())?;
     }
     // output the asm
     if let Some(asm) = asm {

@@ -1,0 +1,78 @@
+use crate::ir::koopa::{BasicBlock, DataFlowGraph, Func, InstData, InstId};
+use crate::asm::rv::{AsmInst, AsmBlock};
+
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::vec::Vec;
+
+// AsmContext records the IR context processing now.
+pub struct AsmContext {
+    pub current_func: Option<Rc<Func>>,
+    pub current_ir_block: Option<Rc<BasicBlock>>,
+    pub current_ir: Option<InstId>,
+    pub current_asm_block: Option<Rc<AsmBlock>>,
+}
+
+impl AsmContext {
+    pub fn new() -> Self {
+        AsmContext {
+            current_func: None,
+            current_ir_block: None,
+            current_ir: None,
+            current_asm_block: None,
+        }
+    }
+
+    pub fn enter_func(&mut self, func: Rc<Func>) {
+        self.current_func = Some(func);
+    }
+
+    pub fn enter_ir_block(&mut self, basic_block: Rc<BasicBlock>) {
+        self.current_ir_block = Some(basic_block);
+    }
+
+    pub fn enter_asm_block(&mut self, asm_block: Rc<AsmBlock>) {
+        self.current_asm_block = Some(asm_block);
+    }
+
+    pub fn enter_ir(&mut self, inst_id: InstId) {
+        self.current_ir = Some(inst_id);
+    }
+
+    pub fn get_current_func(&self) -> Rc<Func> {
+        Rc::clone(self.current_func.as_ref().unwrap())
+    }
+
+    pub fn get_current_ir_block(&self) -> Rc<BasicBlock> {
+        Rc::clone(self.current_ir_block.as_ref().unwrap())
+    }
+
+    pub fn get_current_inst_list(&self) -> Rc<RefCell<Vec<InstId>>> {
+        Rc::clone(&self.get_current_ir_block().inst_list)
+    }
+
+    pub fn get_current_dfg(&self) -> Rc<RefCell<DataFlowGraph>> {
+        Rc::clone(&self.get_current_func().dfg)
+    }
+
+    pub fn get_current_ir_data(&self) -> InstData {
+        let dfg = self.get_current_dfg();
+        let dfg_borrow = dfg.borrow();
+        dfg_borrow
+            .get_inst(self.current_ir.as_ref().unwrap())
+            .unwrap()
+            .clone()
+    }
+
+    pub fn add_asm_inst(&mut self, asm_inst: AsmInst) {
+        if let Some(asm_block) = &mut self.current_asm_block {
+            asm_block.insts.borrow_mut().push(asm_inst);
+        } else {
+            panic!("No current ASM block to add instruction to.");
+        }
+    }
+}
+
+thread_local! {
+    pub static ASM_CONTEXT: RefCell<AsmContext> = RefCell::new(AsmContext::new());
+}

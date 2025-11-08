@@ -1,10 +1,10 @@
-use crate::ast::ast::LVal;
-use crate::ast::op::*;
-use crate::global::context::CONTEXT_STACK;
+use crate::sc::ast::LVal;
+use crate::sc::op::*;
+use crate::global::context::SC_CONTEXT_STACK;
 
 use crate::global::config::BType;
-use crate::koopa_ir::config::KoopaOpCode;
-use crate::koopa_ir::koopa_ir::{insert_ir, InstData, InstId};
+use crate::ir::config::KoopaOpCode;
+use crate::ir::koopa::{insert_ir, InstData, InstId};
 
 #[derive(Debug, Clone)]
 pub enum IRObj {
@@ -108,13 +108,13 @@ impl Expression for LOrExp {
 
                 insert_ir(InstData::new(
                     BType::Int,
-                    IRObj::InstId(CONTEXT_STACK.with(|stack| {
+                    IRObj::InstId(SC_CONTEXT_STACK.with(|stack| {
                         stack.borrow().get_current_dfg().borrow().get_next_inst_id()
                     })),
                     koopa_op,
                     vec![
-                        crate::koopa_ir::koopa_ir::Operand::from_parse_result(left),
-                        crate::koopa_ir::koopa_ir::Operand::from_parse_result(right),
+                        crate::ir::koopa::Operand::from_parse_result(left),
+                        crate::ir::koopa::Operand::from_parse_result(right),
                     ],
                 ))
             }
@@ -196,13 +196,13 @@ impl Expression for LAndExp {
 
                 insert_ir(InstData::new(
                     BType::Int,
-                    IRObj::InstId(CONTEXT_STACK.with(|stack| {
+                    IRObj::InstId(SC_CONTEXT_STACK.with(|stack| {
                         stack.borrow().get_current_dfg().borrow().get_next_inst_id()
                     })),
                     koopa_op,
                     vec![
-                        crate::koopa_ir::koopa_ir::Operand::from_parse_result(left),
-                        crate::koopa_ir::koopa_ir::Operand::from_parse_result(right),
+                        crate::ir::koopa::Operand::from_parse_result(left),
+                        crate::ir::koopa::Operand::from_parse_result(right),
                     ],
                 ))
             }
@@ -268,13 +268,13 @@ impl Expression for EqExp {
 
                 insert_ir(InstData::new(
                     BType::Int,
-                    IRObj::InstId(CONTEXT_STACK.with(|stack| {
+                    IRObj::InstId(SC_CONTEXT_STACK.with(|stack| {
                         stack.borrow().get_current_dfg().borrow().get_next_inst_id()
                     })),
                     koopa_op,
                     vec![
-                        crate::koopa_ir::koopa_ir::Operand::from_parse_result(left),
-                        crate::koopa_ir::koopa_ir::Operand::from_parse_result(right),
+                        crate::ir::koopa::Operand::from_parse_result(left),
+                        crate::ir::koopa::Operand::from_parse_result(right),
                     ],
                 ))
             }
@@ -346,13 +346,13 @@ impl Expression for RelExp {
 
                 insert_ir(InstData::new(
                     BType::Int,
-                    IRObj::InstId(CONTEXT_STACK.with(|stack| {
+                    IRObj::InstId(SC_CONTEXT_STACK.with(|stack| {
                         stack.borrow().get_current_dfg().borrow().get_next_inst_id()
                     })),
                     koopa_op,
                     vec![
-                        crate::koopa_ir::koopa_ir::Operand::from_parse_result(left),
-                        crate::koopa_ir::koopa_ir::Operand::from_parse_result(right),
+                        crate::ir::koopa::Operand::from_parse_result(left),
+                        crate::ir::koopa::Operand::from_parse_result(right),
                     ],
                 ))
             }
@@ -421,7 +421,7 @@ impl Expression for UnaryExp {
                     UnaryOp::Plus => parse_result,
                     UnaryOp::Minus | UnaryOp::Not => insert_ir(InstData::new(
                         BType::Int,
-                        IRObj::InstId(CONTEXT_STACK.with(|stack| {
+                        IRObj::InstId(SC_CONTEXT_STACK.with(|stack| {
                             stack.borrow().get_current_dfg().borrow().get_next_inst_id()
                         })),
                         match unary_op {
@@ -430,8 +430,8 @@ impl Expression for UnaryExp {
                             _ => unreachable!(),
                         },
                         vec![
-                            crate::koopa_ir::koopa_ir::Operand::Const(0),
-                            crate::koopa_ir::koopa_ir::Operand::from_parse_result(parse_result),
+                            crate::ir::koopa::Operand::Const(0),
+                            crate::ir::koopa::Operand::from_parse_result(parse_result),
                         ],
                     )),
                 }
@@ -496,13 +496,13 @@ impl Expression for MulExp {
 
                 insert_ir(InstData::new(
                     BType::Int,
-                    IRObj::InstId(CONTEXT_STACK.with(|stack| {
+                    IRObj::InstId(SC_CONTEXT_STACK.with(|stack| {
                         stack.borrow().get_current_dfg().borrow().get_next_inst_id()
                     })),
                     koopa_op,
                     vec![
-                        crate::koopa_ir::koopa_ir::Operand::from_parse_result(left),
-                        crate::koopa_ir::koopa_ir::Operand::from_parse_result(right),
+                        crate::ir::koopa::Operand::from_parse_result(left),
+                        crate::ir::koopa::Operand::from_parse_result(right),
                     ],
                 ))
             }
@@ -573,13 +573,13 @@ impl Expression for AddExp {
 
                 insert_ir(InstData::new(
                     BType::Int,
-                    IRObj::InstId(CONTEXT_STACK.with(|stack| {
+                    IRObj::InstId(SC_CONTEXT_STACK.with(|stack| {
                         stack.borrow().get_current_dfg().borrow().get_next_inst_id()
                     })),
                     koopa_op,
                     vec![
-                        crate::koopa_ir::koopa_ir::Operand::from_parse_result(left),
-                        crate::koopa_ir::koopa_ir::Operand::from_parse_result(right),
+                        crate::ir::koopa::Operand::from_parse_result(left),
+                        crate::ir::koopa::Operand::from_parse_result(right),
                     ],
                 ))
             }
@@ -630,7 +630,7 @@ impl Expression for PrimaryExp {
             PrimaryExp::Exp { exp } => exp.parse_var_exp(),
 
             PrimaryExp::LVal { l_val } => {
-                match CONTEXT_STACK.with(|stack| stack.borrow().find_highest_priority(&l_val.ident))
+                match SC_CONTEXT_STACK.with(|stack| stack.borrow().find_highest_priority(&l_val.ident))
                 {
                     Some(IRObj::Pointer {
                         initialized,
@@ -644,11 +644,11 @@ impl Expression for PrimaryExp {
                         // if it's a variable stored in memory, load first and return inst_id.
                         insert_ir(InstData::new(
                             BType::Int,
-                            IRObj::InstId(CONTEXT_STACK.with(|stack| {
+                            IRObj::InstId(SC_CONTEXT_STACK.with(|stack| {
                                 stack.borrow().get_current_dfg().borrow().get_next_inst_id()
                             })),
                             KoopaOpCode::LOAD,
-                            vec![crate::koopa_ir::koopa_ir::Operand::Pointer(pointer_id)],
+                            vec![crate::ir::koopa::Operand::Pointer(pointer_id)],
                         ))
                     }
                     Some(IRObj::Const(value)) => IRObj::Const(value),
@@ -667,7 +667,7 @@ impl Expression for PrimaryExp {
 
             PrimaryExp::LVal { l_val } => {
                 if let Some(value) =
-                    CONTEXT_STACK.with(|stack| stack.borrow().get_latest_const(&l_val.ident))
+                    SC_CONTEXT_STACK.with(|stack| stack.borrow().get_latest_const(&l_val.ident))
                 {
                     value
                 } else {

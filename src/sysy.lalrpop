@@ -1,4 +1,4 @@
-use crate::ast::{ast::*, decl::*, exp::*, stmt::*, op::*};
+use crate::sc::{ast::*, decl::*, exp::*, stmt::*, op::*};
 use crate::global::config::BType;
 
 // lalrpop 里的约定

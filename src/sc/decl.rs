@@ -1,8 +1,8 @@
-use crate::ast::exp::{Exp, Expression, IRObj};
+use crate::sc::exp::{Exp, Expression, IRObj};
 use crate::global::config::BType;
-use crate::global::context::CONTEXT_STACK;
-use crate::koopa_ir::config::{KoopaOpCode, PTR_ID_ALLOCATOR};
-use crate::koopa_ir::koopa_ir::{insert_ir, InstData, Operand};
+use crate::global::context::SC_CONTEXT_STACK;
+use crate::ir::config::{KoopaOpCode, PTR_ID_ALLOCATOR};
+use crate::ir::koopa::{insert_ir, InstData, Operand};
 
 use std::vec::Vec;
 
@@ -39,7 +39,7 @@ impl ConstDecl {
     fn parse(&self) {
         for const_def in &self.const_defs {
             let result = const_def.parse();
-            CONTEXT_STACK.with(|stack| {
+            SC_CONTEXT_STACK.with(|stack| {
                 stack
                     .borrow_mut()
                     .insert_const(const_def.ident.clone(), result)
@@ -56,7 +56,7 @@ pub struct ConstDef {
 
 impl Declaration for ConstDef {
     fn parse(&self) -> IRObj {
-        if CONTEXT_STACK
+        if SC_CONTEXT_STACK
             .with(|stack| stack.borrow().get_current_pointer(self.ident.as_str()))
             .is_some()
         {
@@ -64,7 +64,7 @@ impl Declaration for ConstDef {
                 "Cannot declare constant {} with the same name as a variable",
                 self.ident
             );
-        } else if CONTEXT_STACK
+        } else if SC_CONTEXT_STACK
             .with(|stack| stack.borrow().get_current_const(self.ident.as_str()))
             .is_some()
         {
@@ -108,7 +108,7 @@ impl VarDecl {
         for var_def in &self.var_defs {
             let result = var_def.parse();
             // insert pointer into pointer table for parsing first.
-            CONTEXT_STACK.with(|stack| {
+            SC_CONTEXT_STACK.with(|stack| {
                 stack
                     .borrow_mut()
                     .insert_pointer(var_def.ident.clone(), result)
@@ -126,7 +126,7 @@ pub struct VarDef {
 impl Declaration for VarDef {
     fn parse(&self) -> IRObj {
         // semantic check
-        if CONTEXT_STACK
+        if SC_CONTEXT_STACK
             .with(|stack| stack.borrow().get_current_const(self.ident.as_str()))
             .is_some()
         {
@@ -134,7 +134,7 @@ impl Declaration for VarDef {
                 "Cannot declare variable {} with the same name as a constant",
                 self.ident
             );
-        } else if CONTEXT_STACK
+        } else if SC_CONTEXT_STACK
             .with(|stack| stack.borrow().get_current_pointer(self.ident.as_str()))
             .is_some()
         {

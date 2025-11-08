@@ -1,8 +1,9 @@
-use crate::asm::config::{RVRegCode, RVREG_ALLOCATOR};
-use crate::ast::exp::*;
+use crate::asm::config::RVRegCode;
+use crate::asm::reg::RVREG_ALLOCATOR;
+use crate::sc::exp::*;
 use crate::global::config::BType;
-use crate::global::context::CONTEXT_STACK;
-use crate::koopa_ir::config::{KoopaOpCode, BLOCK_ID_ALLOCATOR};
+use crate::global::context::SC_CONTEXT_STACK;
+use crate::ir::config::{KoopaOpCode, BLOCK_ID_ALLOCATOR};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -35,9 +36,9 @@ impl Program {
 impl std::fmt::Display for Program {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for func in &self.funcs {
-            CONTEXT_STACK.with(|stack| stack.borrow_mut().enter_func(Rc::clone(func)));
+            SC_CONTEXT_STACK.with(|stack| stack.borrow_mut().enter_func(Rc::clone(func)));
             writeln!(f, "{}", func)?;
-            CONTEXT_STACK.with(|stack| stack.borrow_mut().exit_func());
+            SC_CONTEXT_STACK.with(|stack| stack.borrow_mut().exit_func());
         }
         Ok(())
     }
@@ -190,7 +191,7 @@ impl std::fmt::Display for Func {
             self.func_type
         )?;
         for block in &*self.basic_blocks.borrow() {
-            CONTEXT_STACK.with(|stack| stack.borrow_mut().enter_block(Rc::clone(block)));
+            SC_CONTEXT_STACK.with(|stack| stack.borrow_mut().enter_block(Rc::clone(block)));
             writeln!(f, "{}", block)?;
         }
 
@@ -327,7 +328,7 @@ impl std::fmt::Display for BasicBlock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "%block_{}: ", self.block_id)?;
 
-        let dfg = CONTEXT_STACK.with(|stack| stack.borrow().get_current_dfg());
+        let dfg = SC_CONTEXT_STACK.with(|stack| stack.borrow().get_current_dfg());
         let dfg_borrow = dfg.borrow();
 
         for inst in &*self.inst_list.borrow() {
@@ -455,9 +456,9 @@ impl std::fmt::Display for InstData {
 
 /// key function to insert instruction into current basic block and DFG
 pub fn insert_ir(inst_data: InstData) -> IRObj {
-    let dfg = CONTEXT_STACK.with(|stack| stack.borrow().get_current_dfg());
+    let dfg = SC_CONTEXT_STACK.with(|stack| stack.borrow().get_current_dfg());
     let mut dfg_mut = dfg.borrow_mut();
-    let inst_list = CONTEXT_STACK.with(|stack| stack.borrow().get_current_inst_list());
+    let inst_list = SC_CONTEXT_STACK.with(|stack| stack.borrow().get_current_inst_list());
     let mut inst_list_mut = inst_list.borrow_mut();
 
     let inst_id = dfg_mut.insert_inst(inst_data.clone());

@@ -1,8 +1,8 @@
-use crate::ast::decl::Decl;
-use crate::ast::stmt::{Statement, Stmt};
+use crate::sc::decl::Decl;
+use crate::sc::stmt::{Statement, Stmt};
 use crate::global::config::BType;
-use crate::global::context::CONTEXT_STACK;
-use crate::koopa_ir::koopa_ir::{BasicBlock, BasicBlockType, Func, Program};
+use crate::global::context::SC_CONTEXT_STACK;
+use crate::ir::koopa::{BasicBlock, BasicBlockType, Func, Program};
 
 use std::rc::Rc;
 
@@ -42,7 +42,7 @@ impl FuncDef {
         let func = Rc::new(Func::new(func_name, func_type.clone(), vec![]));
 
         let basic_block = Rc::new(BasicBlock::new(BasicBlockType::Normal));
-        CONTEXT_STACK.with(|stack| {
+        SC_CONTEXT_STACK.with(|stack| {
             let mut stack_mut = stack.borrow_mut();
             stack_mut.enter_func(Rc::clone(&func));
             stack_mut.enter_block(Rc::clone(&basic_block));
@@ -51,7 +51,7 @@ impl FuncDef {
 
         self.block.parse();
 
-        CONTEXT_STACK.with(|stack| {
+        SC_CONTEXT_STACK.with(|stack| {
             stack.borrow_mut().exit_func();
         });
 

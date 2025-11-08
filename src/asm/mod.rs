@@ -1,5 +1,8 @@
 /**
  * Assembly module
  */
-pub mod asm;
+pub mod rv;
 pub mod config;
+pub mod reg;
+pub mod mem;
+pub mod context;

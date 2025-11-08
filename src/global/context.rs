@@ -1,5 +1,5 @@
-use crate::ast::exp::IRObj;
-use crate::koopa_ir::koopa_ir::{BasicBlock, BlockId, DataFlowGraph, Func, InstId};
+use crate::sc::exp::IRObj;
+use crate::ir::koopa::{BasicBlock, BlockId, DataFlowGraph, Func, InstId};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -55,7 +55,8 @@ impl LoopContext {
     }
 }
 
-pub struct ContextStack {
+/// source code's context stack during parsing
+pub struct ScContextStack {
     // current function
     pub func: Option<Rc<Func>>,
     // current block
@@ -66,9 +67,9 @@ pub struct ContextStack {
     pub sym_cxt_stack: Vec<SymbolContext>,
 }
 
-impl ContextStack {
+impl ScContextStack {
     pub fn new() -> Self {
-        ContextStack {
+        ScContextStack {
             func: None,
             basic_block: None,
             loop_cxt_stack: vec![],
@@ -279,5 +280,5 @@ impl ContextStack {
 }
 
 thread_local! {
-    pub static CONTEXT_STACK: RefCell<ContextStack> = RefCell::new(ContextStack::new());
+    pub static SC_CONTEXT_STACK: RefCell<ScContextStack> = RefCell::new(ScContextStack::new());
 }

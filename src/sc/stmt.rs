@@ -1,9 +1,9 @@
-use crate::ast::ast::{Block, LVal};
-use crate::ast::exp::{Exp, Expression, IRObj};
+use crate::sc::ast::{Block, LVal};
+use crate::sc::exp::{Exp, Expression, IRObj};
 use crate::global::config::BType;
-use crate::global::context::CONTEXT_STACK;
-use crate::koopa_ir::config::KoopaOpCode;
-use crate::koopa_ir::koopa_ir::{insert_ir, BasicBlock, BasicBlockType, InstData, Operand};
+use crate::global::context::SC_CONTEXT_STACK;
+use crate::ir::config::KoopaOpCode;
+use crate::ir::koopa::{insert_ir, BasicBlock, BasicBlockType, InstData, Operand};
 
 use std::rc::Rc;
 
@@ -51,7 +51,7 @@ pub trait ConditionStatement {
 
                 // create brand new block scope for then_stmt
                 let then_block = Rc::new(BasicBlock::new(BasicBlockType::If));
-                CONTEXT_STACK.with(|stack| {
+                SC_CONTEXT_STACK.with(|stack| {
                     stack.borrow_mut().enter_block(Rc::clone(&then_block));
                     // push block here, don't do post-order traverse
                     stack
@@ -70,7 +70,7 @@ pub trait ConditionStatement {
 
                 // block right after the condition statement
                 let end_block = Rc::new(BasicBlock::new(BasicBlockType::Normal));
-                CONTEXT_STACK.with(|stack| {
+                SC_CONTEXT_STACK.with(|stack| {
                     stack.borrow_mut().enter_block(Rc::clone(&end_block));
                     stack
                         .borrow()
@@ -79,7 +79,7 @@ pub trait ConditionStatement {
                 });
 
                 // add label for br inst
-                CONTEXT_STACK.with(|stack| {
+                SC_CONTEXT_STACK.with(|stack| {
                     let dfg = stack.borrow_mut().get_current_dfg();
                     let mut dfg_mut = dfg.borrow_mut();
                     dfg_mut.append_operands(
@@ -113,7 +113,7 @@ pub trait ConditionStatement {
                     ));
 
                     let then_block = Rc::new(BasicBlock::new(BasicBlockType::If));
-                    CONTEXT_STACK.with(|stack| {
+                    SC_CONTEXT_STACK.with(|stack| {
                         stack.borrow_mut().enter_block(Rc::clone(&then_block));
                         stack
                             .borrow_mut()
@@ -129,7 +129,7 @@ pub trait ConditionStatement {
                     ));
 
                     let end_block = Rc::new(BasicBlock::new(BasicBlockType::Normal));
-                    CONTEXT_STACK.with(|stack| {
+                    SC_CONTEXT_STACK.with(|stack| {
                         stack.borrow_mut().enter_block(Rc::clone(&end_block));
                         stack
                             .borrow_mut()
@@ -137,7 +137,7 @@ pub trait ConditionStatement {
                             .push_basic_block(Rc::clone(&end_block));
                     });
 
-                    CONTEXT_STACK.with(|stack| {
+                    SC_CONTEXT_STACK.with(|stack| {
                         let dfg = stack.borrow_mut().get_current_dfg();
                         let mut dfg_mut = dfg.borrow_mut();
                         dfg_mut.append_operands(
@@ -184,7 +184,7 @@ pub trait ConditionStatement {
 
                 // create brand new block scope for then_stmt
                 let then_block = Rc::new(BasicBlock::new(BasicBlockType::If));
-                CONTEXT_STACK.with(|stack| {
+                SC_CONTEXT_STACK.with(|stack| {
                     stack.borrow_mut().enter_block(Rc::clone(&then_block));
                     stack
                         .borrow_mut()
@@ -202,7 +202,7 @@ pub trait ConditionStatement {
 
                 // create brand new block scope for else_stmt
                 let else_block = Rc::new(BasicBlock::new(BasicBlockType::If));
-                CONTEXT_STACK.with(|stack| {
+                SC_CONTEXT_STACK.with(|stack| {
                     stack.borrow_mut().enter_block(Rc::clone(&else_block));
                     stack
                         .borrow_mut()
@@ -219,7 +219,7 @@ pub trait ConditionStatement {
 
                 // block right after the condition statement
                 let end_block = Rc::new(BasicBlock::new(BasicBlockType::Normal));
-                CONTEXT_STACK.with(|stack| {
+                SC_CONTEXT_STACK.with(|stack| {
                     stack.borrow_mut().enter_block(Rc::clone(&end_block));
                     stack
                         .borrow_mut()
@@ -228,7 +228,7 @@ pub trait ConditionStatement {
                 });
 
                 // add label for br inst
-                CONTEXT_STACK.with(|stack| {
+                SC_CONTEXT_STACK.with(|stack| {
                     let dfg = stack.borrow_mut().get_current_dfg();
                     let mut dfg_mut = dfg.borrow_mut();
                     dfg_mut.append_operands(
@@ -269,7 +269,7 @@ pub trait ConditionStatement {
                     ));
 
                     let then_block = Rc::new(BasicBlock::new(BasicBlockType::If));
-                    CONTEXT_STACK.with(|stack| {
+                    SC_CONTEXT_STACK.with(|stack| {
                         stack.borrow_mut().enter_block(Rc::clone(&then_block));
                         stack
                             .borrow_mut()
@@ -285,7 +285,7 @@ pub trait ConditionStatement {
                     ));
 
                     let end_block = Rc::new(BasicBlock::new(BasicBlockType::Normal));
-                    CONTEXT_STACK.with(|stack| {
+                    SC_CONTEXT_STACK.with(|stack| {
                         stack.borrow_mut().enter_block(Rc::clone(&end_block));
                         stack
                             .borrow_mut()
@@ -293,7 +293,7 @@ pub trait ConditionStatement {
                             .push_basic_block(Rc::clone(&end_block));
                     });
 
-                    CONTEXT_STACK.with(|stack| {
+                    SC_CONTEXT_STACK.with(|stack| {
                         let dfg = stack.borrow_mut().get_current_dfg();
                         let mut dfg_mut = dfg.borrow_mut();
                         dfg_mut.append_operands(
@@ -320,7 +320,7 @@ pub trait ConditionStatement {
                     ));
 
                     let else_block = Rc::new(BasicBlock::new(BasicBlockType::If));
-                    CONTEXT_STACK.with(|stack| {
+                    SC_CONTEXT_STACK.with(|stack| {
                         stack.borrow_mut().enter_block(Rc::clone(&else_block));
                         stack
                             .borrow_mut()
@@ -336,7 +336,7 @@ pub trait ConditionStatement {
                     ));
 
                     let end_block = Rc::new(BasicBlock::new(BasicBlockType::Normal));
-                    CONTEXT_STACK.with(|stack| {
+                    SC_CONTEXT_STACK.with(|stack| {
                         stack.borrow_mut().enter_block(Rc::clone(&end_block));
                         stack
                             .borrow_mut()
@@ -344,7 +344,7 @@ pub trait ConditionStatement {
                             .push_basic_block(Rc::clone(&end_block));
                     });
 
-                    CONTEXT_STACK.with(|stack| {
+                    SC_CONTEXT_STACK.with(|stack| {
                         let dfg = stack.borrow_mut().get_current_dfg();
                         let mut dfg_mut = dfg.borrow_mut();
                         dfg_mut.append_operands(
@@ -384,7 +384,7 @@ pub trait WhileStatement {
     fn parse_while_statement(&self) {
         // if the current basic block is not empty, we need to create a while_entry block
         // else we just reuse it as while_entry(change its type)
-        let while_entry = if !CONTEXT_STACK.with(|stack| {
+        let while_entry = if !SC_CONTEXT_STACK.with(|stack| {
             stack
                 .borrow()
                 .get_current_basic_block()
@@ -393,7 +393,7 @@ pub trait WhileStatement {
                 .is_empty()
         }) {
             let while_entry = Rc::new(BasicBlock::new(BasicBlockType::WhileEntry));
-            CONTEXT_STACK.with(|stack| {
+            SC_CONTEXT_STACK.with(|stack| {
                 stack.borrow_mut().enter_block(Rc::clone(&while_entry));
                 stack
                     .borrow_mut()
@@ -402,7 +402,7 @@ pub trait WhileStatement {
             });
             while_entry
         } else {
-            CONTEXT_STACK.with(|stack| {
+            SC_CONTEXT_STACK.with(|stack| {
                 let current_block = stack.borrow().get_current_basic_block();
                 let func = stack.borrow_mut().get_current_func();
                 func.change_block_type(current_block.get_block_id(), BasicBlockType::WhileEntry);
@@ -411,7 +411,7 @@ pub trait WhileStatement {
         };
 
         // add while_entry id to current loop context
-        CONTEXT_STACK.with(|stack| {
+        SC_CONTEXT_STACK.with(|stack| {
             stack
                 .borrow_mut()
                 .add_while_entry_to_current_loop(while_entry.get_block_id());
@@ -451,7 +451,7 @@ pub trait WhileStatement {
         };
 
         let while_body = Rc::new(BasicBlock::new(BasicBlockType::WhileBody));
-        CONTEXT_STACK.with(|stack| {
+        SC_CONTEXT_STACK.with(|stack| {
             stack.borrow_mut().enter_block(Rc::clone(&while_body));
             stack
                 .borrow_mut()
@@ -471,7 +471,7 @@ pub trait WhileStatement {
                 ));
 
                 let end_block = Rc::new(BasicBlock::new(BasicBlockType::Normal));
-                CONTEXT_STACK.with(|stack| {
+                SC_CONTEXT_STACK.with(|stack| {
                     let mut stack_mut = stack.borrow_mut();
 
                     stack_mut.enter_block(Rc::clone(&end_block));
@@ -483,7 +483,7 @@ pub trait WhileStatement {
                     stack_mut.add_end_block_to_current_loop(end_block.get_block_id());
                 });
 
-                CONTEXT_STACK.with(|stack| {
+                SC_CONTEXT_STACK.with(|stack| {
                     {
                         let dfg = stack.borrow_mut().get_current_dfg();
                         let mut dfg_mut = dfg.borrow_mut();
@@ -530,7 +530,7 @@ pub trait WhileStatement {
 
                     // TODO: we still generate the end block even for constant true condition for now
                     let end_block = Rc::new(BasicBlock::new(BasicBlockType::Normal));
-                    CONTEXT_STACK.with(|stack| {
+                    SC_CONTEXT_STACK.with(|stack| {
                         let mut stack_mut = stack.borrow_mut();
                         stack_mut.enter_block(Rc::clone(&end_block));
                         stack_mut
@@ -541,7 +541,7 @@ pub trait WhileStatement {
                         stack_mut.add_end_block_to_current_loop(end_block.get_block_id());
                     });
 
-                    CONTEXT_STACK.with(|stack| {
+                    SC_CONTEXT_STACK.with(|stack| {
                         {
                             let dfg = stack.borrow_mut().get_current_dfg();
                             let mut dfg_mut = dfg.borrow_mut();
@@ -576,7 +576,7 @@ pub trait WhileStatement {
                     });
                 } else {
                     // this case only while_entry exists, so we directly take while_body as end_block
-                    CONTEXT_STACK.with(|stack| {
+                    SC_CONTEXT_STACK.with(|stack| {
                         let stack = stack.borrow();
                         let dfg = stack.get_current_dfg();
                         let mut dfg_mut = dfg.borrow_mut();
@@ -687,13 +687,13 @@ impl Statement for OpenStmt {
             }
 
             OpenStmt::OpenWhile { .. } => {
-                CONTEXT_STACK.with(|stack| {
+                SC_CONTEXT_STACK.with(|stack| {
                     stack.borrow_mut().enter_new_loop();
                 });
 
                 self.parse_while_statement();
 
-                CONTEXT_STACK.with(|stack| {
+                SC_CONTEXT_STACK.with(|stack| {
                     stack.borrow_mut().exit_current_loop();
                 });
             }
@@ -766,13 +766,13 @@ impl Statement for CloseStmt {
                 self.parse_paired_condition();
             }
             CloseStmt::CloseWhile { .. } => {
-                CONTEXT_STACK.with(|stack| {
+                SC_CONTEXT_STACK.with(|stack| {
                     stack.borrow_mut().enter_new_loop();
                 });
 
                 self.parse_while_statement();
 
-                CONTEXT_STACK.with(|stack| {
+                SC_CONTEXT_STACK.with(|stack| {
                     stack.borrow_mut().exit_current_loop();
                 });
             }
@@ -795,19 +795,19 @@ impl Statement for SimpleStmt {
         match self {
             // normal assignment statement
             SimpleStmt::RegularStmt { l_val, exp } => {
-                if CONTEXT_STACK
+                if SC_CONTEXT_STACK
                     .with(|stack| stack.borrow().get_latest_const(l_val.ident.as_str()))
                     .is_some()
                 {
                     panic!("Cannot assign to a constant variable");
-                } else if CONTEXT_STACK
+                } else if SC_CONTEXT_STACK
                     .with(|stack| stack.borrow().get_latest_pointer(l_val.ident.as_str()))
                     .is_none()
                 {
                     panic!("Variable {} not declared", l_val.ident);
                 }
 
-                let pointer = CONTEXT_STACK
+                let pointer = SC_CONTEXT_STACK
                     .with(|stack| stack.borrow().get_latest_pointer(l_val.ident.as_str()))
                     .unwrap();
                 let result = exp.parse_var_exp();
@@ -837,7 +837,7 @@ impl Statement for SimpleStmt {
                 ));
 
                 // set_pointer_initialized
-                CONTEXT_STACK.with(|stack| {
+                SC_CONTEXT_STACK.with(|stack| {
                     stack
                         .borrow_mut()
                         .set_pointer_initialized(l_val.ident.as_str())
@@ -852,16 +852,16 @@ impl Statement for SimpleStmt {
             }
 
             SimpleStmt::Block { block } => {
-                CONTEXT_STACK.with(|stack| stack.borrow_mut().enter_scope());
+                SC_CONTEXT_STACK.with(|stack| stack.borrow_mut().enter_scope());
                 block.parse();
-                CONTEXT_STACK.with(|stack| stack.borrow_mut().exit_scope());
+                SC_CONTEXT_STACK.with(|stack| stack.borrow_mut().exit_scope());
             }
 
             SimpleStmt::Break => {
-                if CONTEXT_STACK
+                if SC_CONTEXT_STACK
                     .with(|stack| stack.borrow().get_current_inst_list().borrow().is_empty())
                 {
-                    CONTEXT_STACK.with(|stack| {
+                    SC_CONTEXT_STACK.with(|stack| {
                         let block_id = stack.borrow().get_current_basic_block().get_block_id();
                         stack
                             .borrow()
@@ -870,7 +870,7 @@ impl Statement for SimpleStmt {
                     });
                 } else {
                     let break_block = Rc::new(BasicBlock::new(BasicBlockType::Break));
-                    CONTEXT_STACK.with(|stack| {
+                    SC_CONTEXT_STACK.with(|stack| {
                         stack.borrow_mut().enter_block(Rc::clone(&break_block));
                         stack
                             .borrow_mut()
@@ -887,11 +887,11 @@ impl Statement for SimpleStmt {
                     vec![],
                 )) {
                     // add current break inst to the loop context
-                    CONTEXT_STACK.with(|stack| stack.borrow_mut().add_new_break(break_inst));
+                    SC_CONTEXT_STACK.with(|stack| stack.borrow_mut().add_new_break(break_inst));
                 }
 
                 let end_block = Rc::new(BasicBlock::new(BasicBlockType::Normal));
-                CONTEXT_STACK.with(|stack| {
+                SC_CONTEXT_STACK.with(|stack| {
                     stack.borrow_mut().enter_block(Rc::clone(&end_block));
                     stack
                         .borrow_mut()
@@ -901,10 +901,10 @@ impl Statement for SimpleStmt {
             }
 
             SimpleStmt::Continue => {
-                if CONTEXT_STACK
+                if SC_CONTEXT_STACK
                     .with(|stack| stack.borrow().get_current_inst_list().borrow().is_empty())
                 {
-                    CONTEXT_STACK.with(|stack| {
+                    SC_CONTEXT_STACK.with(|stack| {
                         let block_id = stack.borrow().get_current_basic_block().get_block_id();
                         stack
                             .borrow()
@@ -913,7 +913,7 @@ impl Statement for SimpleStmt {
                     });
                 } else {
                     let continue_block = Rc::new(BasicBlock::new(BasicBlockType::Continue));
-                    CONTEXT_STACK.with(|stack| {
+                    SC_CONTEXT_STACK.with(|stack| {
                         stack.borrow_mut().enter_block(Rc::clone(&continue_block));
                         stack
                             .borrow_mut()
@@ -930,11 +930,12 @@ impl Statement for SimpleStmt {
                     vec![],
                 )) {
                     // add current continue inst to the loop context
-                    CONTEXT_STACK.with(|stack| stack.borrow_mut().add_new_continue(continue_inst));
+                    SC_CONTEXT_STACK
+                        .with(|stack| stack.borrow_mut().add_new_continue(continue_inst));
                 }
 
                 let end_block = Rc::new(BasicBlock::new(BasicBlockType::Normal));
-                CONTEXT_STACK.with(|stack| {
+                SC_CONTEXT_STACK.with(|stack| {
                     stack.borrow_mut().enter_block(Rc::clone(&end_block));
                     stack
                         .borrow_mut()
