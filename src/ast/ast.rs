@@ -1,6 +1,7 @@
 use crate::ast::decl::Decl;
 use crate::ast::stmt::{Statement, Stmt};
-use crate::config::config::{BType, CONTEXT_STACK};
+use crate::global::config::BType;
+use crate::global::context::CONTEXT_STACK;
 use crate::koopa_ir::koopa_ir::{BasicBlock, BasicBlockType, Func, Program};
 
 use std::rc::Rc;
@@ -93,4 +94,11 @@ impl BlockItem {
 #[derive(Debug, Clone)]
 pub struct LVal {
     pub ident: String,
+}
+
+impl std::fmt::Display for LVal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.ident);
+        Ok(())
+    }
 }

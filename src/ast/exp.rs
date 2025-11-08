@@ -1,8 +1,8 @@
 use crate::ast::ast::LVal;
 use crate::ast::op::*;
-use crate::config::config::CONTEXT_STACK;
+use crate::global::context::CONTEXT_STACK;
 
-use crate::config::config::BType;
+use crate::global::config::BType;
 use crate::koopa_ir::config::KoopaOpCode;
 use crate::koopa_ir::koopa_ir::{insert_ir, InstData, InstId};
 
@@ -653,7 +653,7 @@ impl Expression for PrimaryExp {
                     }
                     Some(IRObj::Const(value)) => IRObj::Const(value),
                     _ => {
-                        panic!("LVal not found in var table, maybe the ident is not defined");
+                        panic!("LVal {} not found in var table, maybe the ident is not defined", l_val);
                     }
                 }
             }
@@ -671,7 +671,7 @@ impl Expression for PrimaryExp {
                 {
                     value
                 } else {
-                    panic!("LVal not found in const table, maybe the ident is for a variable or not defined");
+                    panic!("LVal {} not found in const table, maybe the ident is for a variable or not defined", l_val);
                 }
             }
         }

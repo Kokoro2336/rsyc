@@ -1,6 +1,6 @@
 use crate::ast::exp::{Exp, Expression, IRObj};
-use crate::config::config::BType;
-use crate::config::config::CONTEXT_STACK;
+use crate::global::config::BType;
+use crate::global::context::CONTEXT_STACK;
 use crate::koopa_ir::config::{KoopaOpCode, PTR_ID_ALLOCATOR};
 use crate::koopa_ir::koopa_ir::{insert_ir, InstData, Operand};
 

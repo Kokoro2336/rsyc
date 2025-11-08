@@ -1,4 +1,4 @@
-use crate::config::config::BType;
+use crate::global::config::BType;
 use crate::koopa_ir::koopa_ir::Func;
 
 use std::cell::RefCell;

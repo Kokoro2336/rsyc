@@ -6,8 +6,8 @@ use std::io::Write;
 
 mod asm;
 mod ast;
-mod config;
 mod koopa_ir;
+mod global;
 mod util;
 use crate::asm::asm::Asm;
 use crate::koopa_ir::koopa_ir::{Program};

@@ -1,7 +1,7 @@
 use crate::asm::config::{RVOpCode, RVRegCode, RVREG_ALLOCATOR, RVOperandType, STK_FRM_MANAGER};
 use crate::koopa_ir::config::KoopaOpCode;
 use crate::koopa_ir::koopa_ir::{Func, InstData, Operand, Program};
-use crate::config::config::CONTEXT_STACK;
+use crate::global::context::CONTEXT_STACK;
 
 use std::rc::Rc;
 
@@ -65,10 +65,10 @@ impl Asm {
 
             CONTEXT_STACK.with(|stack| {
                 let mut stack = stack.borrow_mut();
-                stack.enter_func(Rc::clone(&func));
+                stack.enter_func(Rc::clone(func));
             });
 
-            asm.blocks.extend(AsmBlock::from(&func));
+            asm.blocks.extend(AsmBlock::from(func));
 
             CONTEXT_STACK.with(|stack| {
                 let mut stack = stack.borrow_mut();
@@ -135,10 +135,11 @@ impl AsmBlock {
         for (idx, basic_block) in func.basic_blocks.borrow().iter().enumerate() {
             let mut asm_block = AsmBlock::new(func.get_asm_label(basic_block.get_block_id()));
 
-            /// 1. whether to allocate return address
-            /// 2. how much space to allocate for callee-saved registers
-            /// 3. how much space to allocate for local variables
-            /// 4. whether to allocate space for function calling.
+            // TODO:
+            // 1. whether to allocate return address
+            // 2. how much space to allocate for callee-saved registers
+            // 3. how much space to allocate for local variables
+            // 4. whether to allocate space for function calling.
             if idx == 0 {
                 let mut asm_insts: Vec<AsmInst> = vec![];
 

@@ -1,5 +1,5 @@
 use crate::ast::{ast::*, decl::*, exp::*, stmt::*, op::*};
-use crate::config::config::BType;
+use crate::global::config::BType;
 
 // lalrpop 里的约定
 grammar;
@@ -81,6 +81,8 @@ SimpleStmt: SimpleStmt = {
   <block: Block> => SimpleStmt::Block { block: Box::new(block) },
   <exp: Exp> ";" => SimpleStmt::RawExp { exp: Some(exp) },
   ";" => SimpleStmt::RawExp { exp: None },
+  "break" ";" => SimpleStmt::Break,
+  "continue" ";" => SimpleStmt::Continue,
   "return" <exp: Exp> ";" => SimpleStmt::ReturnStmt { exp }
 };
 

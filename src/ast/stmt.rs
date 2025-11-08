@@ -1,7 +1,7 @@
 use crate::ast::ast::{Block, LVal};
 use crate::ast::exp::{Exp, Expression, IRObj};
-use crate::config::config::BType;
-use crate::config::config::CONTEXT_STACK;
+use crate::global::config::BType;
+use crate::global::context::CONTEXT_STACK;
 use crate::koopa_ir::config::KoopaOpCode;
 use crate::koopa_ir::koopa_ir::{insert_ir, BasicBlock, BasicBlockType, InstData, Operand};
 
@@ -410,6 +410,13 @@ pub trait WhileStatement {
             })
         };
 
+        // add while_entry id to current loop context
+        CONTEXT_STACK.with(|stack| {
+            stack
+                .borrow_mut()
+                .add_while_entry_to_current_loop(while_entry.get_block_id());
+        });
+
         // parse as usual
         let result = self.condition().parse_var_exp();
         let entry_end_inst = match result {
@@ -465,40 +472,49 @@ pub trait WhileStatement {
 
                 let end_block = Rc::new(BasicBlock::new(BasicBlockType::Normal));
                 CONTEXT_STACK.with(|stack| {
-                    stack.borrow_mut().enter_block(Rc::clone(&end_block));
-                    stack
-                        .borrow_mut()
+                    let mut stack_mut = stack.borrow_mut();
+
+                    stack_mut.enter_block(Rc::clone(&end_block));
+                    stack_mut
                         .get_current_func()
                         .push_basic_block(Rc::clone(&end_block));
+
+                    // add end block to loop context
+                    stack_mut.add_end_block_to_current_loop(end_block.get_block_id());
                 });
 
                 CONTEXT_STACK.with(|stack| {
-                    let dfg = stack.borrow_mut().get_current_dfg();
-                    let mut dfg_mut = dfg.borrow_mut();
-                    let IRObj::InstId(inst_id) = entry_end_inst else {
-                        unreachable!("entry_end_inst couldn't be non InstId")
-                    };
-                    let opcode = dfg_mut.get_inst(&inst_id).unwrap().opcode.clone();
+                    {
+                        let dfg = stack.borrow_mut().get_current_dfg();
+                        let mut dfg_mut = dfg.borrow_mut();
+                        let IRObj::InstId(inst_id) = entry_end_inst else {
+                            unreachable!("entry_end_inst couldn't be non InstId")
+                        };
+                        let opcode = dfg_mut.get_inst(&inst_id).unwrap().opcode.clone();
 
-                    // append label for while_entry
-                    dfg_mut.append_operands(
-                        inst_id,
-                        match opcode {
-                            KoopaOpCode::BR => vec![
-                                Operand::BlockId(while_body.get_block_id()),
-                                Operand::BlockId(end_block.get_block_id()),
-                            ],
-                            _ => unreachable!("entry_end_inst should be BR"),
-                        },
-                    );
+                        // append label for while_entry
+                        dfg_mut.append_operands(
+                            inst_id,
+                            match opcode {
+                                KoopaOpCode::BR => vec![
+                                    Operand::BlockId(while_body.get_block_id()),
+                                    Operand::BlockId(end_block.get_block_id()),
+                                ],
+                                _ => unreachable!("entry_end_inst should be BR"),
+                            },
+                        );
 
-                    dfg_mut.append_operands(
-                        match jump_to_entry {
-                            IRObj::InstId(id) => id,
-                            _ => unreachable!("jump_id couldn't be non InstId"),
-                        },
-                        vec![Operand::BlockId(while_entry.get_block_id())], // const condition always jumps to body
-                    );
+                        dfg_mut.append_operands(
+                            match jump_to_entry {
+                                IRObj::InstId(id) => id,
+                                _ => unreachable!("jump_id couldn't be non InstId"),
+                            },
+                            vec![Operand::BlockId(while_entry.get_block_id())], // const condition always jumps to body
+                        );
+                    }
+
+                    // fill labels
+                    stack.borrow().fill_labels_for_current_loop();
                 });
             }
 
@@ -515,40 +531,48 @@ pub trait WhileStatement {
                     // TODO: we still generate the end block even for constant true condition for now
                     let end_block = Rc::new(BasicBlock::new(BasicBlockType::Normal));
                     CONTEXT_STACK.with(|stack| {
-                        stack.borrow_mut().enter_block(Rc::clone(&end_block));
-                        stack
-                            .borrow_mut()
+                        let mut stack_mut = stack.borrow_mut();
+                        stack_mut.enter_block(Rc::clone(&end_block));
+                        stack_mut
                             .get_current_func()
                             .push_basic_block(Rc::clone(&end_block));
+
+                        // add end block to loop context
+                        stack_mut.add_end_block_to_current_loop(end_block.get_block_id());
                     });
 
                     CONTEXT_STACK.with(|stack| {
-                        let dfg = stack.borrow_mut().get_current_dfg();
-                        let mut dfg_mut = dfg.borrow_mut();
-                        let IRObj::InstId(inst_id) = entry_end_inst else {
-                            unreachable!("entry_end_inst couldn't be non InstId")
-                        };
-                        let opcode = dfg_mut.get_inst(&inst_id).unwrap().opcode.clone();
+                        {
+                            let dfg = stack.borrow_mut().get_current_dfg();
+                            let mut dfg_mut = dfg.borrow_mut();
+                            let IRObj::InstId(inst_id) = entry_end_inst else {
+                                unreachable!("entry_end_inst couldn't be non InstId")
+                            };
+                            let opcode = dfg_mut.get_inst(&inst_id).unwrap().opcode.clone();
 
-                        // append label from while_entry to while_body
-                        dfg_mut.append_operands(
-                            inst_id,
-                            match opcode {
-                                KoopaOpCode::JUMP => {
-                                    vec![Operand::BlockId(while_body.get_block_id())]
-                                }
-                                _ => unreachable!("entry_end_inst should be JUMP"),
-                            },
-                        );
+                            // append label from while_entry to while_body
+                            dfg_mut.append_operands(
+                                inst_id,
+                                match opcode {
+                                    KoopaOpCode::JUMP => {
+                                        vec![Operand::BlockId(while_body.get_block_id())]
+                                    }
+                                    _ => unreachable!("entry_end_inst should be JUMP"),
+                                },
+                            );
 
-                        // append jump back to while_entry
-                        dfg_mut.append_operands(
-                            match jump_to_entry {
-                                IRObj::InstId(id) => id,
-                                _ => unreachable!("jump_id couldn't be non InstId"),
-                            },
-                            vec![Operand::BlockId(while_entry.get_block_id())], // const condition always jumps to body
-                        );
+                            // append jump back to while_entry
+                            dfg_mut.append_operands(
+                                match jump_to_entry {
+                                    IRObj::InstId(id) => id,
+                                    _ => unreachable!("jump_id couldn't be non InstId"),
+                                },
+                                vec![Operand::BlockId(while_entry.get_block_id())], // const condition always jumps to body
+                            );
+                        }
+
+                        // fill labels
+                        stack.borrow().fill_labels_for_current_loop();
                     });
                 } else {
                     // this case only while_entry exists, so we directly take while_body as end_block
@@ -663,7 +687,15 @@ impl Statement for OpenStmt {
             }
 
             OpenStmt::OpenWhile { .. } => {
+                CONTEXT_STACK.with(|stack| {
+                    stack.borrow_mut().enter_new_loop();
+                });
+
                 self.parse_while_statement();
+
+                CONTEXT_STACK.with(|stack| {
+                    stack.borrow_mut().exit_current_loop();
+                });
             }
         }
     }
@@ -734,7 +766,15 @@ impl Statement for CloseStmt {
                 self.parse_paired_condition();
             }
             CloseStmt::CloseWhile { .. } => {
+                CONTEXT_STACK.with(|stack| {
+                    stack.borrow_mut().enter_new_loop();
+                });
+
                 self.parse_while_statement();
+
+                CONTEXT_STACK.with(|stack| {
+                    stack.borrow_mut().exit_current_loop();
+                });
             }
         }
     }
@@ -745,6 +785,8 @@ pub enum SimpleStmt {
     RegularStmt { l_val: LVal, exp: Exp },
     RawExp { exp: Option<Exp> },
     Block { block: Box<Block> },
+    Break,
+    Continue,
     ReturnStmt { exp: Exp },
 }
 
@@ -802,6 +844,105 @@ impl Statement for SimpleStmt {
                 });
             }
 
+            // is it necessary?
+            SimpleStmt::RawExp { exp } => {
+                if let Some(e) = exp {
+                    let _ = e.parse_var_exp();
+                }
+            }
+
+            SimpleStmt::Block { block } => {
+                CONTEXT_STACK.with(|stack| stack.borrow_mut().enter_scope());
+                block.parse();
+                CONTEXT_STACK.with(|stack| stack.borrow_mut().exit_scope());
+            }
+
+            SimpleStmt::Break => {
+                if CONTEXT_STACK
+                    .with(|stack| stack.borrow().get_current_inst_list().borrow().is_empty())
+                {
+                    CONTEXT_STACK.with(|stack| {
+                        let block_id = stack.borrow().get_current_basic_block().get_block_id();
+                        stack
+                            .borrow()
+                            .get_current_func()
+                            .change_block_type(block_id, BasicBlockType::Break);
+                    });
+                } else {
+                    let break_block = Rc::new(BasicBlock::new(BasicBlockType::Break));
+                    CONTEXT_STACK.with(|stack| {
+                        stack.borrow_mut().enter_block(Rc::clone(&break_block));
+                        stack
+                            .borrow_mut()
+                            .get_current_func()
+                            .push_basic_block(Rc::clone(&break_block));
+                    });
+                }
+
+                // insert jump inst
+                if let IRObj::InstId(break_inst) = insert_ir(InstData::new(
+                    BType::Void,
+                    IRObj::None,
+                    KoopaOpCode::JUMP,
+                    vec![],
+                )) {
+                    // add current break inst to the loop context
+                    CONTEXT_STACK.with(|stack| stack.borrow_mut().add_new_break(break_inst));
+                }
+
+                let end_block = Rc::new(BasicBlock::new(BasicBlockType::Normal));
+                CONTEXT_STACK.with(|stack| {
+                    stack.borrow_mut().enter_block(Rc::clone(&end_block));
+                    stack
+                        .borrow_mut()
+                        .get_current_func()
+                        .push_basic_block(Rc::clone(&end_block));
+                });
+            }
+
+            SimpleStmt::Continue => {
+                if CONTEXT_STACK
+                    .with(|stack| stack.borrow().get_current_inst_list().borrow().is_empty())
+                {
+                    CONTEXT_STACK.with(|stack| {
+                        let block_id = stack.borrow().get_current_basic_block().get_block_id();
+                        stack
+                            .borrow()
+                            .get_current_func()
+                            .change_block_type(block_id, BasicBlockType::Continue);
+                    });
+                } else {
+                    let continue_block = Rc::new(BasicBlock::new(BasicBlockType::Continue));
+                    CONTEXT_STACK.with(|stack| {
+                        stack.borrow_mut().enter_block(Rc::clone(&continue_block));
+                        stack
+                            .borrow_mut()
+                            .get_current_func()
+                            .push_basic_block(Rc::clone(&continue_block));
+                    });
+                }
+
+                // insert jump inst
+                if let IRObj::InstId(continue_inst) = insert_ir(InstData::new(
+                    BType::Void,
+                    IRObj::None,
+                    KoopaOpCode::JUMP,
+                    vec![],
+                )) {
+                    // add current continue inst to the loop context
+                    CONTEXT_STACK.with(|stack| stack.borrow_mut().add_new_continue(continue_inst));
+                }
+
+                let end_block = Rc::new(BasicBlock::new(BasicBlockType::Normal));
+                CONTEXT_STACK.with(|stack| {
+                    stack.borrow_mut().enter_block(Rc::clone(&end_block));
+                    stack
+                        .borrow_mut()
+                        .get_current_func()
+                        .push_basic_block(Rc::clone(&end_block));
+                });
+            }
+
             SimpleStmt::ReturnStmt { exp } => {
                 let result = exp.parse_var_exp();
 
@@ -819,19 +960,6 @@ impl Statement for SimpleStmt {
                         IRObj::None => Operand::None,
                     }],
                 ));
-            }
-
-            // is it necessary?
-            SimpleStmt::RawExp { exp } => {
-                if let Some(e) = exp {
-                    let _ = e.parse_var_exp();
-                }
-            }
-
-            SimpleStmt::Block { block } => {
-                CONTEXT_STACK.with(|stack| stack.borrow_mut().enter_scope());
-                block.parse();
-                CONTEXT_STACK.with(|stack| stack.borrow_mut().exit_scope());
             }
         }
     }

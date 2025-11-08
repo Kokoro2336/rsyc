@@ -1,7 +1,7 @@
 use crate::asm::config::{RVRegCode, RVREG_ALLOCATOR};
 use crate::ast::exp::*;
-use crate::config::config::BType;
-use crate::config::config::CONTEXT_STACK;
+use crate::global::config::BType;
+use crate::global::context::CONTEXT_STACK;
 use crate::koopa_ir::config::{KoopaOpCode, BLOCK_ID_ALLOCATOR};
 
 use std::cell::RefCell;
@@ -121,6 +121,33 @@ impl DataFlowGraph {
     pub fn append_operands(&mut self, inst_id: InstId, operands: Vec<Operand>) {
         if let Some(inst) = self.inst_map.get_mut(&inst_id) {
             inst.operands.extend(operands);
+        } else {
+            panic!("Instruction not found for inst_id {:?}", inst_id);
+        }
+    }
+
+    // fill br inst
+    pub fn fill_br(&mut self, inst_id: InstId, block_id1: BlockId, block_id2: BlockId) {
+        if let Some(inst) = self.inst_map.get_mut(&inst_id) {
+            if inst.operands.len() == 1 {
+                inst.operands.push(Operand::BlockId(block_id1));
+                inst.operands.push(Operand::BlockId(block_id2));
+            } else {
+                panic!("Branch instruction already has target blocks");
+            }
+        } else {
+            panic!("Instruction not found for inst_id {:?}", inst_id);
+        }
+
+    }
+
+    pub fn fill_jump(&mut self, inst_id: InstId, block_id: BlockId) {
+        if let Some(inst) = self.inst_map.get_mut(&inst_id) {
+            if inst.operands.is_empty() {
+                inst.operands.push(Operand::BlockId(block_id));
+            } else {
+                panic!("Jump instruction already has target block");
+            }
         } else {
             panic!("Instruction not found for inst_id {:?}", inst_id);
         }
@@ -261,15 +288,20 @@ pub enum BasicBlockType {
     Normal,
     If,
     Else,
+    Break,
+    Continue,
     WhileEntry,
     WhileBody,
 }
 
+pub type BlockId = u32;
+
 #[derive(Clone)]
 pub struct BasicBlock {
-    pub block_id: u32,
+    pub block_id: BlockId,
     pub block_type: RefCell<BasicBlockType>,
     pub inst_list: Rc<RefCell<Vec<InstId>>>,
+    pub jump_to_inst: Vec<InstId>,              // record inst that jump to current block
 }
 
 impl BasicBlock {
@@ -278,6 +310,7 @@ impl BasicBlock {
             block_id: BLOCK_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
             block_type: RefCell::new(block_type),
             inst_list: Rc::new(RefCell::new(vec![])),
+            jump_to_inst: vec![]
         }
     }
 
