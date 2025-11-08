@@ -1,7 +1,7 @@
-use crate::sc::exp::{Exp, Expression, IRObj};
+use crate::sc::exp::{Exp, Expression};
 use crate::global::config::BType;
 use crate::global::context::SC_CONTEXT_STACK;
-use crate::ir::config::{KoopaOpCode, PTR_ID_ALLOCATOR};
+use crate::ir::config::{KoopaOpCode, PTR_ID_ALLOCATOR, IRObj};
 use crate::ir::koopa::{insert_ir, InstData, Operand};
 
 use std::vec::Vec;
@@ -156,14 +156,14 @@ impl Declaration for VarDef {
         if let Some(init_val) = &self.init_val {
             let parse_result = init_val.parse();
             // we don't need to store temp var to var_table here for it'll be removed soon after STORE
-            if let IRObj::Const(_) | IRObj::InstId(_) = parse_result {
+            if let IRObj::Const(_) | IRObj::IRVar(_) = parse_result {
                 insert_ir(InstData::new(
                     BType::Void,
                     IRObj::None,
                     KoopaOpCode::STORE,
                     vec![
                         match parse_result {
-                            IRObj::InstId(id) => Operand::InstId(id),
+                            IRObj::IRVar(id) => Operand::InstId(id),
                             IRObj::Const(c) => Operand::Const(c),
                             _ => unreachable!(),
                         },

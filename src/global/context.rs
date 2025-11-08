@@ -1,4 +1,4 @@
-use crate::sc::exp::IRObj;
+use crate::ir::config::IRObj;
 use crate::ir::koopa::{BasicBlock, BlockId, DataFlowGraph, Func, InstId};
 
 use std::cell::RefCell;

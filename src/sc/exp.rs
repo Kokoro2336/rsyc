@@ -1,46 +1,9 @@
+use crate::global::config::BType;
+use crate::global::context::SC_CONTEXT_STACK;
+use crate::ir::config::{IRObj, KoopaOpCode, IR_VAR_ID_ALLOCATOR};
+use crate::ir::koopa::{insert_ir, InstData};
 use crate::sc::ast::LVal;
 use crate::sc::op::*;
-use crate::global::context::SC_CONTEXT_STACK;
-
-use crate::global::config::BType;
-use crate::ir::config::KoopaOpCode;
-use crate::ir::koopa::{insert_ir, InstData, InstId};
-
-#[derive(Debug, Clone)]
-pub enum IRObj {
-    InstId(InstId), // temp variable, display in format "%id"
-    Const(i32),     // constant value, display in literal
-    Pointer { initialized: bool, pointer_id: u32 }, // pointer to a variable in memory, display in format "@pointer_id"
-    None,
-}
-
-impl IRObj {
-    pub fn get_value(&self) -> i32 {
-        match self {
-            IRObj::Const(v) => *v,
-            _ => panic!("Not a constant value: {:?}", self),
-        }
-    }
-
-    pub fn get_id(&self) -> InstId {
-        match self {
-            IRObj::InstId(id) => *id,
-            _ => panic!("Not an instruction ID: {:?}", self),
-        }
-    }
-
-    pub fn to_string(&self) -> String {
-        match self {
-            IRObj::InstId(id) => format!("%{}", id),
-            IRObj::Const(c) => format!("{}", c),
-            IRObj::Pointer {
-                initialized: _,
-                pointer_id,
-            } => format!("@{}", pointer_id),
-            IRObj::None => "".to_string(),
-        }
-    }
-}
 
 pub trait Expression {
     fn parse_var_exp(&self) -> IRObj;
@@ -101,22 +64,29 @@ impl Expression for LOrExp {
                 }
 
                 let right = land_exp.parse_var_exp();
+                if let IRObj::Const(v) = &right {
+                    if *v != 0 {
+                        return IRObj::Const(1);
+                    }
+                }
 
                 let koopa_op = match lor_op {
                     LOrOp::Or => KoopaOpCode::OR,
                 };
 
+                let ir_obj = IRObj::IRVar(
+                    IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
+                );
                 insert_ir(InstData::new(
                     BType::Int,
-                    IRObj::InstId(SC_CONTEXT_STACK.with(|stack| {
-                        stack.borrow().get_current_dfg().borrow().get_next_inst_id()
-                    })),
+                    ir_obj.clone(),
                     koopa_op,
                     vec![
                         crate::ir::koopa::Operand::from_parse_result(left),
                         crate::ir::koopa::Operand::from_parse_result(right),
                     ],
-                ))
+                ));
+                ir_obj
             }
         }
     }
@@ -172,9 +142,7 @@ pub enum LAndExp {
 impl Expression for LAndExp {
     fn parse_var_exp(&self) -> IRObj {
         match self {
-            LAndExp::EqExp { eq_exp } => {
-                return eq_exp.parse_var_exp();
-            }
+            LAndExp::EqExp { eq_exp } => eq_exp.parse_var_exp(),
             LAndExp::LAndExp {
                 land_exp,
                 land_op,
@@ -189,22 +157,29 @@ impl Expression for LAndExp {
                 }
 
                 let right = eq_exp.parse_var_exp();
+                if let IRObj::Const(v) = &right {
+                    if *v == 0 {
+                        return IRObj::Const(0);
+                    }
+                }
 
                 let koopa_op = match land_op {
                     LAndOp::And => KoopaOpCode::AND,
                 };
 
+                let ir_obj = IRObj::IRVar(
+                    IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
+                );
                 insert_ir(InstData::new(
                     BType::Int,
-                    IRObj::InstId(SC_CONTEXT_STACK.with(|stack| {
-                        stack.borrow().get_current_dfg().borrow().get_next_inst_id()
-                    })),
+                    ir_obj.clone(),
                     koopa_op,
                     vec![
                         crate::ir::koopa::Operand::from_parse_result(left),
                         crate::ir::koopa::Operand::from_parse_result(right),
                     ],
-                ))
+                ));
+                ir_obj
             }
         }
     }
@@ -266,17 +241,19 @@ impl Expression for EqExp {
                     EqOp::Ne => KoopaOpCode::NE,
                 };
 
+                let ir_obj = IRObj::IRVar(
+                    IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
+                );
                 insert_ir(InstData::new(
                     BType::Int,
-                    IRObj::InstId(SC_CONTEXT_STACK.with(|stack| {
-                        stack.borrow().get_current_dfg().borrow().get_next_inst_id()
-                    })),
+                    ir_obj.clone(),
                     koopa_op,
                     vec![
                         crate::ir::koopa::Operand::from_parse_result(left),
                         crate::ir::koopa::Operand::from_parse_result(right),
                     ],
-                ))
+                ));
+                ir_obj
             }
         }
     }
@@ -344,17 +321,19 @@ impl Expression for RelExp {
                     RelOp::Ge => KoopaOpCode::GE,
                 };
 
+                let ir_obj = IRObj::IRVar(
+                    IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
+                );
                 insert_ir(InstData::new(
                     BType::Int,
-                    IRObj::InstId(SC_CONTEXT_STACK.with(|stack| {
-                        stack.borrow().get_current_dfg().borrow().get_next_inst_id()
-                    })),
+                    ir_obj.clone(),
                     koopa_op,
                     vec![
                         crate::ir::koopa::Operand::from_parse_result(left),
                         crate::ir::koopa::Operand::from_parse_result(right),
                     ],
-                ))
+                ));
+                ir_obj
             }
         }
     }
@@ -419,21 +398,25 @@ impl Expression for UnaryExp {
 
                 match unary_op {
                     UnaryOp::Plus => parse_result,
-                    UnaryOp::Minus | UnaryOp::Not => insert_ir(InstData::new(
-                        BType::Int,
-                        IRObj::InstId(SC_CONTEXT_STACK.with(|stack| {
-                            stack.borrow().get_current_dfg().borrow().get_next_inst_id()
-                        })),
-                        match unary_op {
-                            UnaryOp::Minus => KoopaOpCode::SUB,
-                            UnaryOp::Not => KoopaOpCode::EQ,
-                            _ => unreachable!(),
-                        },
-                        vec![
-                            crate::ir::koopa::Operand::Const(0),
-                            crate::ir::koopa::Operand::from_parse_result(parse_result),
-                        ],
-                    )),
+                    UnaryOp::Minus | UnaryOp::Not => {
+                        let ir_obj = IRObj::IRVar(
+                            IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
+                        );
+                        insert_ir(InstData::new(
+                            BType::Int,
+                            ir_obj.clone(),
+                            match unary_op {
+                                UnaryOp::Minus => KoopaOpCode::SUB,
+                                UnaryOp::Not => KoopaOpCode::EQ,
+                                _ => unreachable!(),
+                            },
+                            vec![
+                                crate::ir::koopa::Operand::Const(0),
+                                crate::ir::koopa::Operand::from_parse_result(parse_result),
+                            ],
+                        ));
+                        ir_obj
+                    }
                 }
             }
         }
@@ -494,17 +477,19 @@ impl Expression for MulExp {
                     MulOp::Mod => KoopaOpCode::MOD,
                 };
 
+                let ir_obj = IRObj::IRVar(
+                    IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
+                );
                 insert_ir(InstData::new(
                     BType::Int,
-                    IRObj::InstId(SC_CONTEXT_STACK.with(|stack| {
-                        stack.borrow().get_current_dfg().borrow().get_next_inst_id()
-                    })),
+                    ir_obj.clone(),
                     koopa_op,
                     vec![
                         crate::ir::koopa::Operand::from_parse_result(left),
                         crate::ir::koopa::Operand::from_parse_result(right),
                     ],
-                ))
+                ));
+                ir_obj
             }
         }
     }
@@ -571,17 +556,19 @@ impl Expression for AddExp {
                     AddOp::Sub => KoopaOpCode::SUB,
                 };
 
+                let ir_obj = IRObj::IRVar(
+                    IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
+                );
                 insert_ir(InstData::new(
                     BType::Int,
-                    IRObj::InstId(SC_CONTEXT_STACK.with(|stack| {
-                        stack.borrow().get_current_dfg().borrow().get_next_inst_id()
-                    })),
+                    ir_obj.clone(),
                     koopa_op,
                     vec![
                         crate::ir::koopa::Operand::from_parse_result(left),
                         crate::ir::koopa::Operand::from_parse_result(right),
                     ],
-                ))
+                ));
+                ir_obj
             }
         }
     }
@@ -630,7 +617,8 @@ impl Expression for PrimaryExp {
             PrimaryExp::Exp { exp } => exp.parse_var_exp(),
 
             PrimaryExp::LVal { l_val } => {
-                match SC_CONTEXT_STACK.with(|stack| stack.borrow().find_highest_priority(&l_val.ident))
+                match SC_CONTEXT_STACK
+                    .with(|stack| stack.borrow().find_highest_priority(&l_val.ident))
                 {
                     Some(IRObj::Pointer {
                         initialized,
@@ -642,18 +630,23 @@ impl Expression for PrimaryExp {
                         }
 
                         // if it's a variable stored in memory, load first and return inst_id.
+                        let ir_obj = IRObj::IRVar(
+                            IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
+                        );
                         insert_ir(InstData::new(
                             BType::Int,
-                            IRObj::InstId(SC_CONTEXT_STACK.with(|stack| {
-                                stack.borrow().get_current_dfg().borrow().get_next_inst_id()
-                            })),
+                            ir_obj.clone(),
                             KoopaOpCode::LOAD,
                             vec![crate::ir::koopa::Operand::Pointer(pointer_id)],
-                        ))
+                        ));
+                        ir_obj
                     }
                     Some(IRObj::Const(value)) => IRObj::Const(value),
                     _ => {
-                        panic!("LVal {} not found in var table, maybe the ident is not defined", l_val);
+                        panic!(
+                            "LVal {} not found in var table, maybe the ident is not defined",
+                            l_val
+                        );
                     }
                 }
             }

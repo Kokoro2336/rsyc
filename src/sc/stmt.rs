@@ -1,9 +1,9 @@
-use crate::sc::ast::{Block, LVal};
-use crate::sc::exp::{Exp, Expression, IRObj};
 use crate::global::config::BType;
 use crate::global::context::SC_CONTEXT_STACK;
-use crate::ir::config::KoopaOpCode;
+use crate::ir::config::{IRObj, KoopaOpCode};
 use crate::ir::koopa::{insert_ir, BasicBlock, BasicBlockType, InstData, Operand};
+use crate::sc::ast::{Block, LVal};
+use crate::sc::exp::{Exp, Expression};
 
 use std::rc::Rc;
 
@@ -38,7 +38,7 @@ pub trait ConditionStatement {
     fn parse_single_condition(&self) {
         let result = self.condition().parse_var_exp();
         match result {
-            IRObj::InstId(inst_id) => {
+            IRObj::IRVar(inst_id) => {
                 let br_id = insert_ir(InstData::new(
                     BType::Void,
                     IRObj::None,
@@ -83,20 +83,14 @@ pub trait ConditionStatement {
                     let dfg = stack.borrow_mut().get_current_dfg();
                     let mut dfg_mut = dfg.borrow_mut();
                     dfg_mut.append_operands(
-                        match br_id {
-                            IRObj::InstId(id) => id,
-                            _ => unreachable!("br_id couldn't be non InstId"),
-                        },
+                        br_id,
                         vec![
                             Operand::BlockId(then_block.get_block_id()),
                             Operand::BlockId(end_block.get_block_id()),
                         ],
                     );
                     dfg_mut.append_operands(
-                        match jump_id {
-                            IRObj::InstId(id) => id,
-                            _ => unreachable!("jump_id couldn't be non InstId"),
-                        },
+                        jump_id,
                         vec![Operand::BlockId(end_block.get_block_id())],
                     );
                 });
@@ -141,17 +135,11 @@ pub trait ConditionStatement {
                         let dfg = stack.borrow_mut().get_current_dfg();
                         let mut dfg_mut = dfg.borrow_mut();
                         dfg_mut.append_operands(
-                            match jump_then {
-                                IRObj::InstId(id) => id,
-                                _ => unreachable!("jump_id couldn't be non InstId"),
-                            },
+                            jump_then,
                             vec![Operand::BlockId(then_block.get_block_id())],
                         );
                         dfg_mut.append_operands(
-                            match jump_end {
-                                IRObj::InstId(id) => id,
-                                _ => unreachable!("jump_id couldn't be non InstId"),
-                            },
+                            jump_end,
                             vec![Operand::BlockId(end_block.get_block_id())],
                         );
                     });
@@ -171,7 +159,7 @@ pub trait ConditionStatement {
     fn parse_paired_condition(&self) {
         let result = self.condition().parse_var_exp();
         match result {
-            IRObj::InstId(inst_id) => {
+            IRObj::IRVar(inst_id) => {
                 let br_id = insert_ir(InstData::new(
                     BType::Void,
                     IRObj::None,
@@ -232,27 +220,18 @@ pub trait ConditionStatement {
                     let dfg = stack.borrow_mut().get_current_dfg();
                     let mut dfg_mut = dfg.borrow_mut();
                     dfg_mut.append_operands(
-                        match br_id {
-                            IRObj::InstId(id) => id,
-                            _ => unreachable!("br_id couldn't be non InstId"),
-                        },
+                        br_id,
                         vec![
                             Operand::BlockId(then_block.get_block_id()),
                             Operand::BlockId(else_block.get_block_id()),
                         ],
                     );
                     dfg_mut.append_operands(
-                        match then_to_end {
-                            IRObj::InstId(id) => id,
-                            _ => unreachable!("jump_id couldn't be non InstId"),
-                        },
+                        then_to_end,
                         vec![Operand::BlockId(end_block.get_block_id())],
                     );
                     dfg_mut.append_operands(
-                        match else_to_end {
-                            IRObj::InstId(id) => id,
-                            _ => unreachable!("jump_id couldn't be non InstId"),
-                        },
+                        else_to_end,
                         vec![Operand::BlockId(end_block.get_block_id())],
                     );
                 });
@@ -297,17 +276,11 @@ pub trait ConditionStatement {
                         let dfg = stack.borrow_mut().get_current_dfg();
                         let mut dfg_mut = dfg.borrow_mut();
                         dfg_mut.append_operands(
-                            match jump_then {
-                                IRObj::InstId(id) => id,
-                                _ => unreachable!("jump_id couldn't be non InstId"),
-                            },
+                            jump_then,
                             vec![Operand::BlockId(then_block.get_block_id())],
                         );
                         dfg_mut.append_operands(
-                            match jump_end {
-                                IRObj::InstId(id) => id,
-                                _ => unreachable!("jump_id couldn't be non InstId"),
-                            },
+                            jump_end,
                             vec![Operand::BlockId(end_block.get_block_id())],
                         );
                     });
@@ -348,17 +321,11 @@ pub trait ConditionStatement {
                         let dfg = stack.borrow_mut().get_current_dfg();
                         let mut dfg_mut = dfg.borrow_mut();
                         dfg_mut.append_operands(
-                            match jump_else {
-                                IRObj::InstId(id) => id,
-                                _ => unreachable!("jump_id couldn't be non InstId"),
-                            },
+                            jump_else,
                             vec![Operand::BlockId(else_block.get_block_id())],
                         );
                         dfg_mut.append_operands(
-                            match jump_end {
-                                IRObj::InstId(id) => id,
-                                _ => unreachable!("jump_id couldn't be non InstId"),
-                            },
+                            jump_end,
                             vec![Operand::BlockId(end_block.get_block_id())],
                         );
                     });
@@ -420,7 +387,7 @@ pub trait WhileStatement {
         // parse as usual
         let result = self.condition().parse_var_exp();
         let entry_end_inst = match result {
-            IRObj::InstId(inst_id) => {
+            IRObj::IRVar(inst_id) => {
                 insert_ir(InstData::new(
                     BType::Void,
                     IRObj::None,
@@ -461,7 +428,7 @@ pub trait WhileStatement {
 
         // parse the body
         match result {
-            IRObj::InstId(_) => {
+            IRObj::IRVar(_) => {
                 self.body_stmt().parse();
                 let jump_to_entry = insert_ir(InstData::new(
                     BType::Void,
@@ -487,14 +454,11 @@ pub trait WhileStatement {
                     {
                         let dfg = stack.borrow_mut().get_current_dfg();
                         let mut dfg_mut = dfg.borrow_mut();
-                        let IRObj::InstId(inst_id) = entry_end_inst else {
-                            unreachable!("entry_end_inst couldn't be non InstId")
-                        };
-                        let opcode = dfg_mut.get_inst(&inst_id).unwrap().opcode.clone();
+                        let opcode = dfg_mut.get_inst(&entry_end_inst).unwrap().opcode.clone();
 
                         // append label for while_entry
                         dfg_mut.append_operands(
-                            inst_id,
+                            entry_end_inst,
                             match opcode {
                                 KoopaOpCode::BR => vec![
                                     Operand::BlockId(while_body.get_block_id()),
@@ -505,10 +469,7 @@ pub trait WhileStatement {
                         );
 
                         dfg_mut.append_operands(
-                            match jump_to_entry {
-                                IRObj::InstId(id) => id,
-                                _ => unreachable!("jump_id couldn't be non InstId"),
-                            },
+                            jump_to_entry,
                             vec![Operand::BlockId(while_entry.get_block_id())], // const condition always jumps to body
                         );
                     }
@@ -545,14 +506,11 @@ pub trait WhileStatement {
                         {
                             let dfg = stack.borrow_mut().get_current_dfg();
                             let mut dfg_mut = dfg.borrow_mut();
-                            let IRObj::InstId(inst_id) = entry_end_inst else {
-                                unreachable!("entry_end_inst couldn't be non InstId")
-                            };
-                            let opcode = dfg_mut.get_inst(&inst_id).unwrap().opcode.clone();
+                            let opcode = dfg_mut.get_inst(&entry_end_inst).unwrap().opcode.clone();
 
                             // append label from while_entry to while_body
                             dfg_mut.append_operands(
-                                inst_id,
+                                entry_end_inst,
                                 match opcode {
                                     KoopaOpCode::JUMP => {
                                         vec![Operand::BlockId(while_body.get_block_id())]
@@ -563,10 +521,7 @@ pub trait WhileStatement {
 
                             // append jump back to while_entry
                             dfg_mut.append_operands(
-                                match jump_to_entry {
-                                    IRObj::InstId(id) => id,
-                                    _ => unreachable!("jump_id couldn't be non InstId"),
-                                },
+                                jump_to_entry,
                                 vec![Operand::BlockId(while_entry.get_block_id())], // const condition always jumps to body
                             );
                         }
@@ -580,10 +535,7 @@ pub trait WhileStatement {
                         let stack = stack.borrow();
                         let dfg = stack.get_current_dfg();
                         let mut dfg_mut = dfg.borrow_mut();
-                        let IRObj::InstId(inst_id) = entry_end_inst else {
-                            unreachable!("entry_end_inst couldn't be non InstId")
-                        };
-                        let opcode = dfg_mut.get_inst(&inst_id).unwrap().opcode.clone();
+                        let opcode = dfg_mut.get_inst(&entry_end_inst).unwrap().opcode.clone();
 
                         // change while_body's type to normal
                         let func = stack.get_current_func();
@@ -591,7 +543,7 @@ pub trait WhileStatement {
 
                         // append label from while_entry to while_body(end_block)
                         dfg_mut.append_operands(
-                            inst_id,
+                            entry_end_inst,
                             match opcode {
                                 KoopaOpCode::JUMP => {
                                     vec![Operand::BlockId(while_body.get_block_id())]
@@ -818,7 +770,7 @@ impl Statement for SimpleStmt {
                     KoopaOpCode::STORE,
                     vec![
                         match result {
-                            IRObj::InstId(id) => Operand::InstId(id),
+                            IRObj::IRVar(id) => Operand::InstId(id),
                             IRObj::Const(value) => Operand::Const(value),
                             IRObj::Pointer {
                                 initialized: _,
@@ -880,15 +832,15 @@ impl Statement for SimpleStmt {
                 }
 
                 // insert jump inst
-                if let IRObj::InstId(break_inst) = insert_ir(InstData::new(
+                let break_inst = insert_ir(InstData::new(
                     BType::Void,
                     IRObj::None,
                     KoopaOpCode::JUMP,
                     vec![],
-                )) {
-                    // add current break inst to the loop context
-                    SC_CONTEXT_STACK.with(|stack| stack.borrow_mut().add_new_break(break_inst));
-                }
+                ));
+
+                // add current break inst to the loop context
+                SC_CONTEXT_STACK.with(|stack| stack.borrow_mut().add_new_break(break_inst));
 
                 let end_block = Rc::new(BasicBlock::new(BasicBlockType::Normal));
                 SC_CONTEXT_STACK.with(|stack| {
@@ -923,16 +875,16 @@ impl Statement for SimpleStmt {
                 }
 
                 // insert jump inst
-                if let IRObj::InstId(continue_inst) = insert_ir(InstData::new(
+                let continue_inst = insert_ir(InstData::new(
                     BType::Void,
                     IRObj::None,
                     KoopaOpCode::JUMP,
                     vec![],
-                )) {
-                    // add current continue inst to the loop context
-                    SC_CONTEXT_STACK
-                        .with(|stack| stack.borrow_mut().add_new_continue(continue_inst));
-                }
+                )); 
+
+                // add current continue inst to the loop context
+                SC_CONTEXT_STACK
+                    .with(|stack| stack.borrow_mut().add_new_continue(continue_inst));
 
                 let end_block = Rc::new(BasicBlock::new(BasicBlockType::Normal));
                 SC_CONTEXT_STACK.with(|stack| {
@@ -952,7 +904,7 @@ impl Statement for SimpleStmt {
                     IRObj::None,
                     KoopaOpCode::RET,
                     vec![match result {
-                        IRObj::InstId(id) => Operand::InstId(id),
+                        IRObj::IRVar(id) => Operand::InstId(id),
                         IRObj::Const(value) => Operand::Const(value),
                         IRObj::Pointer {
                             initialized: _,

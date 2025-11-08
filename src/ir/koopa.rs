@@ -1,8 +1,8 @@
 use crate::asm::config::RVRegCode;
 use crate::asm::reg::RVREG_ALLOCATOR;
-use crate::sc::exp::*;
 use crate::global::config::BType;
 use crate::global::context::SC_CONTEXT_STACK;
+use crate::ir::config::IRObj;
 use crate::ir::config::{KoopaOpCode, BLOCK_ID_ALLOCATOR};
 
 use std::cell::RefCell;
@@ -139,7 +139,6 @@ impl DataFlowGraph {
         } else {
             panic!("Instruction not found for inst_id {:?}", inst_id);
         }
-
     }
 
     pub fn fill_jump(&mut self, inst_id: InstId, block_id: BlockId) {
@@ -302,7 +301,7 @@ pub struct BasicBlock {
     pub block_id: BlockId,
     pub block_type: RefCell<BasicBlockType>,
     pub inst_list: Rc<RefCell<Vec<InstId>>>,
-    pub jump_to_inst: Vec<InstId>,              // record inst that jump to current block
+    pub jump_to_inst: Vec<InstId>, // record inst that jump to current block
 }
 
 impl BasicBlock {
@@ -311,7 +310,7 @@ impl BasicBlock {
             block_id: BLOCK_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
             block_type: RefCell::new(block_type),
             inst_list: Rc::new(RefCell::new(vec![])),
-            jump_to_inst: vec![]
+            jump_to_inst: vec![],
         }
     }
 
@@ -339,7 +338,7 @@ impl std::fmt::Display for BasicBlock {
                     continue;
                 }
                 _ => {
-                    if let IRObj::InstId(_) = inst_data.ir_obj {
+                    if let IRObj::IRVar(_) = inst_data.ir_obj {
                         writeln!(f, "  %{} = {}", inst, inst_data)?;
                     } else if let IRObj::Pointer {
                         initialized: _,
@@ -374,7 +373,7 @@ pub enum Operand {
 impl Operand {
     pub fn from_parse_result(parse_result: IRObj) -> Self {
         match parse_result {
-            IRObj::InstId(id) => Operand::InstId(id),
+            IRObj::IRVar(id) => Operand::InstId(id),
             IRObj::Const(c) => Operand::Const(c),
             IRObj::Pointer {
                 initialized: _,
@@ -455,7 +454,7 @@ impl std::fmt::Display for InstData {
 }
 
 /// key function to insert instruction into current basic block and DFG
-pub fn insert_ir(inst_data: InstData) -> IRObj {
+pub fn insert_ir(inst_data: InstData) -> InstId {
     let dfg = SC_CONTEXT_STACK.with(|stack| stack.borrow().get_current_dfg());
     let mut dfg_mut = dfg.borrow_mut();
     let inst_list = SC_CONTEXT_STACK.with(|stack| stack.borrow().get_current_inst_list());
@@ -471,5 +470,5 @@ pub fn insert_ir(inst_data: InstData) -> IRObj {
     }
 
     inst_list_mut.push(inst_id);
-    IRObj::InstId(inst_id)
+    inst_id
 }

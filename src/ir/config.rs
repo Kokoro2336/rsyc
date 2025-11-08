@@ -1,11 +1,6 @@
 use std::cell::RefCell;
 
-thread_local! {
-    // initialize pointer id allocator
-    pub static PTR_ID_ALLOCATOR: RefCell<IdAllocator> = RefCell::new(IdAllocator::new());
-    // initialize koopa ir block id allocator
-    pub static BLOCK_ID_ALLOCATOR: RefCell<IdAllocator> = RefCell::new(IdAllocator::new());
-}
+use crate::ir::koopa::InstId;
 
 #[derive(Debug, Clone)]
 pub enum KoopaOpCode {
@@ -113,4 +108,51 @@ impl IdAllocator {
     pub fn get_next_id(&self) -> u32 {
         self.current_id
     }
+}
+
+#[derive(Debug, Clone)]
+pub enum IRObj {
+    IRVar(u32), // temp variable, display in format "%id"
+    Const(i32),     // constant value, display in literal
+    Pointer { initialized: bool, pointer_id: u32 }, // pointer to a variable in memory, display in format "@pointer_id"
+    None,
+}
+
+impl IRObj {
+    pub fn get_value(&self) -> i32 {
+        match self {
+            IRObj::Const(v) => *v,
+            _ => panic!("Not a constant value: {:?}", self),
+        }
+    }
+
+    pub fn get_id(&self) -> InstId {
+        match self {
+            IRObj::IRVar(id) => *id,
+            _ => panic!("Not an instruction ID: {:?}", self),
+        }
+    }
+}
+
+impl ToString for IRObj {
+    fn to_string(&self) -> String {
+        match self {
+            IRObj::IRVar(id) => format!("%{}", id),
+            IRObj::Const(c) => format!("{}", c),
+            IRObj::Pointer {
+                initialized: _,
+                pointer_id,
+            } => format!("@{}", pointer_id),
+            IRObj::None => "".to_string(),
+        }
+    }
+}
+
+thread_local! {
+    // initialize pointer id allocator
+    pub static PTR_ID_ALLOCATOR: RefCell<IdAllocator> = RefCell::new(IdAllocator::new());
+    // initialize koopa ir block id allocator
+    pub static BLOCK_ID_ALLOCATOR: RefCell<IdAllocator> = RefCell::new(IdAllocator::new());
+    // initialize ir inst id allocator
+    pub static IR_VAR_ID_ALLOCATOR: RefCell<IdAllocator> = RefCell::new(IdAllocator::new());
 }
