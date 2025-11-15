@@ -17,17 +17,52 @@ match {
 // 定义 CompUnit, 其返回值类型为 String
 // parser 在解析完成后的行为是返回 FuncDef 的值
 pub CompUnit: CompUnit = {
-  <func_defs: (FuncDef)*> => {
-    CompUnit { global_decls: vec![], func_defs }
+  <global_objs: (GlobalObj)*> => {
+    let mut comp_unit = CompUnit { global_decls: vec![], func_defs: vec![] };
+    global_objs.iter().for_each(|obj| comp_unit.push_obj(obj.clone()));
+    comp_unit
   }
-}
+};
+
+GlobalObj: GlobalObj = {
+  <func_def: FuncDef> => GlobalObj::FuncDef(func_def),
+  <global_decl: Decl> => GlobalObj::GlobalDecl(global_decl),
+};
 
 // 同上, 不解释
 FuncDef: FuncDef = {
-  <func_type: BType> <ident: Ident> "(" ")" <block: Block> => {
+  <func_type: BType> <ident: Ident> "(" <func_fparams: FuncFParams> ")" <block: Block> => {
     // construct FuncDef struct, using shorthand <> to pass all named fields
-    FuncDef { <> }
+    FuncDef { 
+      func_type,
+      ident,
+      params: func_fparams,
+      block,
+    }
+  },
+  // case with no parameters
+  <func_type: BType> <ident: Ident> "(" ")" <block: Block> => {
+    FuncDef { 
+      func_type,
+      ident,
+      params: vec![],
+      block,
+     }
+  },
+};
+
+FuncFParams: Vec<FuncFParam> = {
+  <first_param: FuncFParam> <other_params: ("," FuncFParam)*> => {
+    let mut param_list = vec![first_param];
+    for (_, other_param) in other_params {
+      param_list.push(other_param);
+    }
+    param_list
   }
+};
+
+FuncFParam: FuncFParam = {
+  <param_type: BType> <ident: Ident> => FuncFParam { param_type, ident },
 };
 
 BType: BType = {
@@ -79,11 +114,13 @@ OpenStmt: OpenStmt = {
 SimpleStmt: SimpleStmt = {
   <l_val: LVal> "=" <exp: Exp> ";" => SimpleStmt::RegularStmt { l_val, exp },
   <block: Block> => SimpleStmt::Block { block: Box::new(block) },
-  <exp: Exp> ";" => SimpleStmt::RawExp { exp: Some(exp) },
-  ";" => SimpleStmt::RawExp { exp: None },
+  // return statement should have higher priority that RawExp.
+  "return" <exp: Exp> ";" => SimpleStmt::ReturnStmt { exp: Some(exp) },
+  "return" ";" => SimpleStmt::ReturnStmt { exp: None },
   "break" ";" => SimpleStmt::Break,
   "continue" ";" => SimpleStmt::Continue,
-  "return" <exp: Exp> ";" => SimpleStmt::ReturnStmt { exp }
+  <exp: Exp> ";" => SimpleStmt::RawExp { exp: Some(exp) },
+  ";" => SimpleStmt::RawExp { exp: None },
 };
 
 LVal: LVal = {
@@ -181,6 +218,21 @@ RelExp: RelExp = {
 
 UnaryExp: UnaryExp = {
   <unary_op: UnaryOp> <unary_exp: UnaryExp> => UnaryExp::UnaryExp { unary_op: unary_op, unary_exp: Box::new(unary_exp) },
+  // function calling
+  <ident: Ident> "(" <arg: Exp> <other_args: ("," Exp)*> ")" => UnaryExp::FunctionCall {
+      ident,
+      args: {
+          let mut arg_list = vec![arg];
+          for (_, other_arg) in other_args {
+              arg_list.push(other_arg);
+          }
+          arg_list
+      }
+  },
+  <ident: Ident> "(" ")" => UnaryExp::FunctionCall {
+      ident,
+      args: vec![],
+  },
   <primary_exp: PrimaryExp> => UnaryExp::PrimaryExp { exp: Box::new(primary_exp) },
 };
 

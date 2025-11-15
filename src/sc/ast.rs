@@ -1,10 +1,17 @@
-use crate::sc::decl::Decl;
-use crate::sc::stmt::{Statement, Stmt};
 use crate::global::config::BType;
 use crate::global::context::SC_CONTEXT_STACK;
-use crate::ir::koopa::{BasicBlock, BasicBlockType, Func, Program};
+use crate::ir::config::{KoopaOpCode, PTR_ID_ALLOCATOR};
+use crate::ir::koopa::{insert_ir, BasicBlock, BasicBlockType, Func, IRObj, InstData, Program};
+use crate::sc::decl::Decl;
+use crate::sc::stmt::{Statement, Stmt};
 
 use std::rc::Rc;
+
+#[derive(Debug, Clone)]
+pub enum GlobalObj {
+    GlobalDecl(Decl),
+    FuncDef(FuncDef),
+}
 
 /// define the AST structure
 #[derive(Debug)]
@@ -14,41 +21,104 @@ pub struct CompUnit {
 }
 
 impl CompUnit {
-    pub fn parse(&self) -> Result<Program, Box<dyn std::error::Error>> {
+    pub fn parse(&self) -> Program {
         // construct Program and return
         let mut program = Program::new();
+        let mut has_main = false;
+
+        // init all global defs in global table first for later searching
+        self.global_decls
+            .iter()
+            .for_each(|global_decl| match global_decl {
+                Decl::ConstDecl { const_decl } => {
+                    const_decl.const_defs.iter().for_each(|def| {
+                        SC_CONTEXT_STACK.with(|stack| {
+                            stack
+                                .borrow_mut()
+                                .insert_global_sym(def.ident.clone(), IRObj::None)
+                        })
+                    });
+                }
+                Decl::VarDecl { var_decl } => var_decl.var_defs.iter().for_each(|def| {
+                    SC_CONTEXT_STACK.with(|stack| {
+                        stack
+                            .borrow_mut()
+                            .insert_global_sym(def.ident.clone(), IRObj::None)
+                    })
+                }),
+            });
+
+        program.global_vals = self
+            .global_decls
+            .iter()
+            .fold(vec![], |mut acc, global_decl| {
+                let parse_result = global_decl.parse_global();
+                // filter out the consts, but parsing is still needed
+                if matches!(global_decl, Decl::VarDecl { .. }) {
+                    acc.extend(parse_result)
+                };
+                acc
+            });
+
         for func in &self.func_defs {
-            program.push_func(Rc::clone(&func.parse()));
+            if func.ident == "main" && matches!(func.func_type, BType::Int) {
+                has_main = true;
+            }
+            program.push_func(func.parse());
         }
-        Ok(program)
+
+        // semantic check: must have main function
+        if !has_main {
+            panic!("No main function with return type int found.");
+        }
+
+        program
+    }
+
+    pub fn push_obj(&mut self, global_obj: GlobalObj) {
+        match global_obj {
+            GlobalObj::GlobalDecl(global_decl) => self.global_decls.push(global_decl),
+            GlobalObj::FuncDef(func_def) => self.func_defs.push(func_def),
+        }
+    }
+
+    pub fn get_func_def(&self, name: &String) -> Option<&FuncDef> {
+        for func in &self.func_defs {
+            if func.ident == *name {
+                return Some(func);
+            }
+        }
+        panic!("Function {} not found.", name);
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FuncDef {
     pub func_type: BType,
     pub ident: String,
+    pub params: Vec<FuncFParam>,
     pub block: Block,
 }
 
 impl FuncDef {
     fn parse(&self) -> Rc<Func> {
-        // TODO: processing global value
-
         // get func type and ident
         let func_type = &self.func_type;
         let func_name = self.ident.clone();
 
-        let func = Rc::new(Func::new(func_name, func_type.clone(), vec![]));
+        let func = Rc::new(Func::new(func_name, func_type.clone(), self.params.clone()));
+        SC_CONTEXT_STACK.with(|stack| {
+            stack.borrow_mut().enter_func(Rc::clone(&func));
+        });
 
-        let basic_block = Rc::new(BasicBlock::new(BasicBlockType::Normal));
+        let basic_block = Rc::new(BasicBlock::new(BasicBlockType::FuncEntry));
         SC_CONTEXT_STACK.with(|stack| {
             let mut stack_mut = stack.borrow_mut();
-            stack_mut.enter_func(Rc::clone(&func));
             stack_mut.enter_block(Rc::clone(&basic_block));
             stack_mut.get_current_func().push_basic_block(basic_block);
         });
 
+        self.init_func_param(); // process params
         self.block.parse();
 
         SC_CONTEXT_STACK.with(|stack| {
@@ -57,6 +127,44 @@ impl FuncDef {
 
         func
     }
+
+    fn init_func_param(&self) {
+        self.params.iter().enumerate().for_each(|(index, param)| {
+            let sc_var_id = PTR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc());
+            let sc_var = IRObj::ScVar {
+                initialized: true,
+                sc_var_id,
+            };
+
+            insert_ir(InstData::new(
+                BType::Int,
+                sc_var.clone(),
+                KoopaOpCode::ALLOC,
+                vec![IRObj::BType(BType::Int)],
+            ));
+
+            insert_ir(InstData::new(
+                BType::Void,
+                IRObj::None,
+                KoopaOpCode::STORE,
+                vec![
+                    IRObj::Param {
+                        param_type: param.param_type.clone(),
+                        idx: index as u32,
+                        ident: param.ident.clone(),
+                    },
+                    sc_var.clone(),
+                ],
+            ));
+
+            // add to global_sc_var_table
+            SC_CONTEXT_STACK.with(|stack| {
+                stack
+                    .borrow_mut()
+                    .insert_sc_var(param.ident.clone(), sc_var);
+            });
+        });
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -64,11 +172,50 @@ pub struct Block {
     pub block_items: Vec<BlockItem>,
 }
 
+#[derive(Debug, Clone)]
+pub struct FuncFParam {
+    pub param_type: BType,
+    pub ident: String,
+}
+
+impl std::fmt::Display for FuncFParam {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.param_type, self.ident);
+        Ok(())
+    }
+}
+
 impl Block {
     pub fn parse(&self) {
         for item in &self.block_items {
             item.parse();
         }
+        // add return instruction if not present
+        let (end_with_return, func_name, func_type) = SC_CONTEXT_STACK.with(|stack| {
+            let stack_mut = stack.borrow_mut();
+            let current_func = stack_mut.get_current_func();
+            (
+                current_func.end_with_return(),
+                current_func.name.clone(),
+                current_func.func_type.clone(),
+            )
+        });
+
+        if !end_with_return {
+            match func_type {
+                BType::Void => {
+                    insert_ir(InstData::new(
+                        BType::Void,
+                        IRObj::None,
+                        KoopaOpCode::RET,
+                        vec![],
+                    ));
+                }
+                _ => {
+                    // when panic here, the compiler can't gen correct ir, but this won't happen when do nothing
+                }
+            }
+        };
     }
 }
 

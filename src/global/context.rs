@@ -1,5 +1,7 @@
-use crate::ir::config::IRObj;
+use crate::ir::config::SYSY_STD_LIB;
+use crate::ir::koopa::IRObj;
 use crate::ir::koopa::{BasicBlock, BlockId, DataFlowGraph, Func, InstId};
+use crate::sc::ast::{CompUnit, FuncDef, FuncFParam};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -8,15 +10,15 @@ use std::rc::Rc;
 pub struct SymbolContext {
     // current function's symbol tables
     pub global_const_table: HashMap<String, IRObj>,
-    // current function's pointer tables
-    pub global_pointer_table: HashMap<String, IRObj>,
+    // current function's sc_var tables
+    pub global_sc_var_table: HashMap<String, IRObj>,
 }
 
 impl SymbolContext {
     pub fn new() -> Self {
         SymbolContext {
             global_const_table: HashMap::new(),
-            global_pointer_table: HashMap::new(),
+            global_sc_var_table: HashMap::new(),
         }
     }
 }
@@ -57,10 +59,14 @@ impl LoopContext {
 
 /// source code's context stack during parsing
 pub struct ScContextStack {
+    // CompUnit
+    pub comp_unit: Option<Rc<CompUnit>>,
     // current function
     pub func: Option<Rc<Func>>,
     // current block
     pub basic_block: Option<Rc<BasicBlock>>,
+    // global symbol table
+    pub global_sym_table: HashMap<String, IRObj>,
     // loop context stack, mainly used for recording break/continue inst in current loop
     pub loop_cxt_stack: Vec<LoopContext>,
     // symbol context stack
@@ -69,12 +75,74 @@ pub struct ScContextStack {
 
 impl ScContextStack {
     pub fn new() -> Self {
+        // import SysY standard library
+        let global_sym_table = SYSY_STD_LIB.with(|lib| {
+            lib.iter()
+                .map(|func_decl| {
+                    (
+                        func_decl.ident.clone(),
+                        IRObj::FuncSym(func_decl.ident.clone()),
+                    )
+                })
+                .collect::<HashMap<_, _>>()
+        });
+
         ScContextStack {
+            comp_unit: None,
             func: None,
             basic_block: None,
+            global_sym_table,
             loop_cxt_stack: vec![],
             sym_cxt_stack: vec![],
         }
+    }
+
+    pub fn set_comp_unit(&mut self, comp_unit: Rc<CompUnit>) {
+        self.comp_unit = Some(comp_unit);
+    }
+
+    pub fn insert_global_sym(&mut self, name: String, value: IRObj) {
+        let global_sym = self.global_sym_table.get(&name);
+        if global_sym.is_some()
+            && (matches!(global_sym.unwrap(), IRObj::FuncSym(_)) | matches!(global_sym.unwrap(), IRObj::Const(_)))
+        {
+            panic!(
+                "Global symbol {name} already exists, and you can't update value of FuncSym or Const"
+            );
+        }
+
+        self.global_sym_table.insert(name, value);
+    }
+
+    pub fn get_global_sym(&self, name: &str) -> Option<IRObj> {
+        self.global_sym_table
+            .get(name)
+            .cloned()
+    }
+
+    pub fn has_local_cxt(&self) -> bool {
+        !self.sym_cxt_stack.is_empty()
+    }
+
+    pub fn get_func_def(&self, func_ident: String) -> FuncDef {
+        if let Some(comp_unit) = &self.comp_unit {
+            if let Some(func_def) = comp_unit.func_defs.iter().find(|fd| fd.ident == func_ident) {
+                func_def.clone()
+
+            } else if let Some(func_decl) = SYSY_STD_LIB.with(|lib| lib.iter().find(|func_decl| func_decl.ident == func_ident).cloned()) {
+                func_decl.clone()
+
+            } else {
+                panic!("No function definitions found in CompUnit");
+            }
+        } else {
+            panic!("CompUnit is not set in context stack");
+        }
+    }
+
+    pub fn get_func_def_params(&self, func_ident: String) -> Vec<FuncFParam> {
+        let func_def = self.get_func_def(func_ident);
+        func_def.params.clone()
     }
 
     pub fn enter_block(&mut self, basic_block: Rc<BasicBlock>) {
@@ -83,7 +151,7 @@ impl ScContextStack {
 
     pub fn enter_func(&mut self, func: Rc<Func>) {
         self.func = Some(func);
-        self.sym_cxt_stack.push(SymbolContext::new());  // remember to create a new symbol context as function's initial scope
+        self.sym_cxt_stack.push(SymbolContext::new()); // remember to create a new symbol context as function's initial scope
     }
 
     pub fn exit_func(&mut self) {
@@ -109,26 +177,29 @@ impl ScContextStack {
         }
     }
 
-    pub fn insert_pointer(&mut self, name: String, value: IRObj) {
+    pub fn insert_sc_var(&mut self, name: String, value: IRObj) {
         if let Some(current_context) = self.sym_cxt_stack.last_mut() {
-            current_context.global_pointer_table.insert(name, value);
+            current_context.global_sc_var_table.insert(name, value);
         } else {
-            panic!("No context available to insert pointer");
+            panic!("No context available to insert sc_var");
         }
     }
 
-    pub fn set_pointer_initialized(&mut self, name: &str) {
+    pub fn set_sc_var_initialized(&mut self, name: &str) {
         for context in self.sym_cxt_stack.iter_mut().rev() {
-            if let Some(IRObj::Pointer {
+            if let Some(IRObj::ScVar {
                 initialized,
-                pointer_id: _,
-            }) = context.global_pointer_table.get_mut(name)
+                sc_var_id: _,
+            }) = context.global_sc_var_table.get_mut(name)
             {
                 *initialized = true;
                 return;
             }
         }
-        panic!("Pointer {} not found to set initialized", name);
+        // if the val is in global context, ignore it.
+        if !matches!(self.global_sym_table.get(name), Some(IRObj::ScVar { .. })) {
+            panic!("ScVar {name} not found to set initialized");
+        }
     }
 
     pub fn get_latest_const(&self, name: &str) -> Option<IRObj> {
@@ -137,12 +208,25 @@ impl ScContextStack {
                 return Some(value.clone());
             }
         }
+        // if not found in local contexts, check global context
+        if let Some(value) = self.global_sym_table.get(name) {
+            if let IRObj::Const(_) = value {
+                return Some(value.clone());
+            }
+        }
         None
     }
 
-    pub fn get_latest_pointer(&self, name: &str) -> Option<IRObj> {
+    /// this func will search in both local and global contexts
+    pub fn get_latest_var(&self, name: &str) -> Option<IRObj> {
         for context in self.sym_cxt_stack.iter().rev() {
-            if let Some(value) = context.global_pointer_table.get(name) {
+            if let Some(value) = context.global_sc_var_table.get(name) {
+                return Some(value.clone());
+            }
+        }
+        // if not found in local contexts, check global context
+        if let Some(value) = self.global_sym_table.get(name) {
+            if matches!(value, IRObj::GlobalVar { .. }) {
                 return Some(value.clone());
             }
         }
@@ -159,10 +243,10 @@ impl ScContextStack {
         None
     }
 
-    pub fn get_current_pointer(&self, name: &str) -> Option<IRObj> {
+    pub fn get_current_sc_var(&self, name: &str) -> Option<IRObj> {
         let stack = &self.sym_cxt_stack;
         if let Some(current_context) = stack.last() {
-            if let Some(value) = current_context.global_pointer_table.get(name) {
+            if let Some(value) = current_context.global_sc_var_table.get(name) {
                 return Some(value.clone());
             }
         }
@@ -204,12 +288,15 @@ impl ScContextStack {
     /// find any type of named IRObj with highest priority in the stack.
     pub fn find_highest_priority(&self, name: &str) -> Option<IRObj> {
         for context in self.sym_cxt_stack.iter().rev() {
-            if let Some(value) = context.global_pointer_table.get(name) {
+            if let Some(value) = context.global_sc_var_table.get(name) {
                 return Some(value.clone());
             }
             if let Some(value) = context.global_const_table.get(name) {
                 return Some(value.clone());
             }
+        }
+        if let Some(value) = self.global_sym_table.get(name) {
+            return Some(value.clone());
         }
         None
     }
@@ -246,19 +333,21 @@ impl ScContextStack {
             .last()
             .expect("No LoopContext available");
 
-        let while_entry: BlockId =
-            BlockId::from(cxt.while_entry.expect("While entry block is not set"));
-        let end_block: BlockId = BlockId::from(cxt.end_block.expect("End block is not set"));
+        let while_entry: BlockId = cxt
+            .while_entry
+            .clone()
+            .expect("While entry block is not set");
+        let end_block: BlockId = cxt.end_block.clone().expect("End block is not set");
 
         let dfg = self.get_current_dfg();
         let mut dfg_mut = dfg.borrow_mut();
 
         for &continue_inst in &cxt.continue_inst_list {
-            dfg_mut.fill_jump(continue_inst, while_entry);
+            dfg_mut.fill_jump(continue_inst, while_entry.clone());
         }
 
         for &break_inst in &cxt.break_inst_list {
-            dfg_mut.fill_jump(break_inst, end_block);
+            dfg_mut.fill_jump(break_inst, end_block.clone());
         }
     }
 
@@ -276,6 +365,14 @@ impl ScContextStack {
         } else {
             panic!("No loop context available to add end block")
         };
+    }
+
+    pub fn get_comp_unit(&self) -> Rc<CompUnit> {
+        if let Some(comp_unit) = &self.comp_unit {
+            Rc::clone(comp_unit)
+        } else {
+            panic!("CompUnit is not set in context stack");
+        }
     }
 }
 

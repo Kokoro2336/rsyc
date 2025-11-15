@@ -1,13 +1,16 @@
-use crate::sc::exp::{Exp, Expression};
 use crate::global::config::BType;
 use crate::global::context::SC_CONTEXT_STACK;
-use crate::ir::config::{KoopaOpCode, PTR_ID_ALLOCATOR, IRObj};
-use crate::ir::koopa::{insert_ir, InstData, Operand};
+use crate::ir::config::{KoopaOpCode, PTR_ID_ALLOCATOR};
+use crate::ir::koopa::{insert_ir, IRObj, InstData};
+use crate::sc::exp::{Exp, Expression};
 
 use std::vec::Vec;
 
 pub trait Declaration {
     fn parse(&self) -> IRObj;
+    fn parse_global(&self) -> IRObj {
+        IRObj::None
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -25,6 +28,13 @@ impl Decl {
             Decl::VarDecl { var_decl } => {
                 var_decl.parse();
             }
+        }
+    }
+
+    pub fn parse_global(&self) -> Vec<IRObj> {
+        match self {
+            Decl::ConstDecl { const_decl } => const_decl.parse_global(),
+            Decl::VarDecl { var_decl } => var_decl.parse_global(),
         }
     }
 }
@@ -46,6 +56,21 @@ impl ConstDecl {
             });
         }
     }
+
+    fn parse_global(&self) -> Vec<IRObj> {
+        self.const_defs
+            .iter()
+            .map(|const_def| {
+                let result = const_def.parse_global();
+                SC_CONTEXT_STACK.with(|stack| {
+                    stack
+                        .borrow_mut()
+                        .insert_global_sym(const_def.ident.clone(), result.clone())
+                });
+                result
+            })
+            .collect::<Vec<IRObj>>()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -57,20 +82,26 @@ pub struct ConstDef {
 impl Declaration for ConstDef {
     fn parse(&self) -> IRObj {
         if SC_CONTEXT_STACK
-            .with(|stack| stack.borrow().get_current_pointer(self.ident.as_str()))
+            .with(|stack| stack.borrow().get_current_sc_var(self.ident.as_str()))
             .is_some()
         {
             panic!(
                 "Cannot declare constant {} with the same name as a variable",
                 self.ident
             );
-        } else if SC_CONTEXT_STACK
+        }
+
+        if SC_CONTEXT_STACK
             .with(|stack| stack.borrow().get_current_const(self.ident.as_str()))
             .is_some()
         {
             panic!("Constant {} already declared", self.ident);
         }
 
+        self.const_init_val.parse()
+    }
+
+    fn parse_global(&self) -> IRObj {
         self.const_init_val.parse()
     }
 }
@@ -107,13 +138,31 @@ impl VarDecl {
     fn parse(&self) {
         for var_def in &self.var_defs {
             let result = var_def.parse();
-            // insert pointer into pointer table for parsing first.
+            // insert sc_var into sc_var table for parsing first.
             SC_CONTEXT_STACK.with(|stack| {
                 stack
                     .borrow_mut()
-                    .insert_pointer(var_def.ident.clone(), result)
+                    .insert_sc_var(var_def.ident.clone(), result)
             });
         }
+    }
+
+    fn parse_global(&self) -> Vec<IRObj> {
+        self.var_defs
+            .iter()
+            .map(|var_def| {
+                let result = var_def.parse_global();
+
+                // insert sc_var into sc_var table for parsing first.
+                SC_CONTEXT_STACK.with(|stack| {
+                    stack
+                        .borrow_mut()
+                        .insert_global_sym(var_def.ident.clone(), result.clone())
+                });
+
+                result
+            })
+            .collect::<Vec<IRObj>>()
     }
 }
 
@@ -134,23 +183,25 @@ impl Declaration for VarDef {
                 "Cannot declare variable {} with the same name as a constant",
                 self.ident
             );
-        } else if SC_CONTEXT_STACK
-            .with(|stack| stack.borrow().get_current_pointer(self.ident.as_str()))
+        }
+
+        if SC_CONTEXT_STACK
+            .with(|stack| stack.borrow().get_current_sc_var(self.ident.as_str()))
             .is_some()
         {
             panic!("Variable {} already declared", self.ident);
         }
 
-        let pointer_id = PTR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc());
+        let sc_var_id = PTR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc());
         // whatever the init_val is, we need to allocate space for the variable
         insert_ir(InstData::new(
             BType::Int,
-            IRObj::Pointer {
+            IRObj::ScVar {
                 initialized: self.init_val.is_some(),
-                pointer_id, // placeholder, will be replaced
+                sc_var_id, // placeholder, will be replaced
             },
             KoopaOpCode::ALLOC,
-            vec![Operand::BType(BType::Int)],
+            vec![IRObj::BType(BType::Int)],
         ));
 
         if let Some(init_val) = &self.init_val {
@@ -163,20 +214,49 @@ impl Declaration for VarDef {
                     KoopaOpCode::STORE,
                     vec![
                         match parse_result {
-                            IRObj::IRVar(id) => Operand::InstId(id),
-                            IRObj::Const(c) => Operand::Const(c),
+                            IRObj::IRVar(id) => IRObj::IRVar(id),
+                            IRObj::Const(c) => IRObj::Const(c),
                             _ => unreachable!(),
                         },
                         // the allocated address
-                        Operand::Pointer(pointer_id),
+                        IRObj::ScVar {
+                            initialized: self.init_val.is_some(),
+                            sc_var_id,
+                        },
                     ],
                 ));
             }
         };
 
-        IRObj::Pointer {
+        IRObj::ScVar {
             initialized: self.init_val.is_some(),
-            pointer_id,
+            sc_var_id,
+        }
+    }
+
+    fn parse_global(&self) -> IRObj {
+        if SC_CONTEXT_STACK.with(|stack| {
+            let global_sym = stack.borrow().get_global_sym(&self.ident);
+            global_sym.is_some() && !matches!(Some(IRObj::None), global_sym)
+        }) {
+            panic!("Global variable {} already declared", self.ident);
+        }
+
+        let parse_result = match &self.init_val {
+            Some(init_val) => init_val.parse(),
+            None => IRObj::Const(0),
+        };
+
+        IRObj::GlobalVar {
+            initialized: self.init_val.is_some(),
+            global_var_id: self.ident.clone(),
+            init_val: match parse_result {
+                IRObj::Const(c) => c,
+                _ => unreachable!(
+                    "Global variable {} must be initialized with a constant",
+                    &self.ident
+                ),
+            },
         }
     }
 }

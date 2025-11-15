@@ -3,6 +3,7 @@ use crate::asm::reg::RVREG_ALLOCATOR;
 pub const REG_IDLE: u32 = u32::MAX;
 pub const STK_FRM_BASE_LENGTH: u32 = 16; // 16 bytes for minimum
 pub const RISCV_BITS: u32 = 32;
+pub const REG_PARAMS_MAX_NUM: u32 = 8;
 
 #[derive(Clone, Debug)]
 pub enum RVOpCode {
@@ -84,8 +85,8 @@ pub enum RVRegCode {
     T0 = 5,
     T1 = 6,
     T2 = 7, // temporaries
-    S0 = 8,
-    S1 = 9, // saved registers / frame pointer
+    S0 = 8, // fp
+    S1 = 9, // saved registers / frame sc_var
     A0 = 10,
     A1 = 11,
     A2 = 12,
@@ -112,11 +113,12 @@ pub enum RVRegCode {
 
 #[derive(Debug, Clone)]
 pub enum RVOperandType {
-    Temp(RVRegCode),                            // reg temporarily allocated, often for asms transformed from the same IR.
-    Perm(RVRegCode),                            // reg permanently allocated, often for the reg eventually used by the whole IR.
-    Label(String),                              // label for branch/jump
+    Temp(RVRegCode), // reg temporarily allocated, often for asms transformed from the same IR.
+    Perm(RVRegCode), // reg permanently allocated, often for the reg eventually used by the whole IR.
+    Label(String),   // label for branch/jump
     MemWithReg { offset: u32, reg: RVRegCode }, // memory location in stack frame
-    None,                                       // no reg allocated
+    Params(Vec<Box<RVOperandType>>),
+    None, // no reg allocated
 }
 
 impl std::fmt::Display for RVOperandType {
@@ -128,7 +130,7 @@ impl std::fmt::Display for RVOperandType {
                 write!(f, "{}({})", offset, reg)
             }
             RVOperandType::Label(label) => write!(f, "{}", label),
-            RVOperandType::None => write!(f, ""),
+            RVOperandType::None | RVOperandType::Params(_) => write!(f, ""),
         }
     }
 }
@@ -140,6 +142,7 @@ impl RVOperandType {
             RVOperandType::Perm(reg) => *reg,
             RVOperandType::MemWithReg { reg, .. } => *reg,
             RVOperandType::Label(_) => panic!("Label type has no register!"),
+            RVOperandType::Params(_) => panic!("Could not call get_reg on Params Type"),
             RVOperandType::None => panic!("No register allocated!"),
         }
     }

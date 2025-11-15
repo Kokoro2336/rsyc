@@ -1,13 +1,12 @@
 use crate::global::config::BType;
 use crate::global::context::SC_CONTEXT_STACK;
-use crate::ir::config::{IRObj, KoopaOpCode, IR_VAR_ID_ALLOCATOR};
-use crate::ir::koopa::{insert_ir, InstData};
+use crate::ir::config::{KoopaOpCode, IR_VAR_ID_ALLOCATOR};
+use crate::ir::koopa::{insert_ir, IRObj, InstData};
 use crate::sc::ast::LVal;
 use crate::sc::op::*;
 
 pub trait Expression {
     fn parse_var_exp(&self) -> IRObj;
-
     fn parse_const_exp(&self) -> IRObj;
 }
 
@@ -46,9 +45,7 @@ pub enum LOrExp {
 impl Expression for LOrExp {
     fn parse_var_exp(&self) -> IRObj {
         match self {
-            LOrExp::LAndExp { land_exp } => {
-                return land_exp.parse_var_exp();
-            }
+            LOrExp::LAndExp { land_exp } => land_exp.parse_var_exp(),
 
             LOrExp::LOrExp {
                 lor_exp,
@@ -61,6 +58,8 @@ impl Expression for LOrExp {
                     if *v != 0 {
                         return IRObj::Const(1);
                     }
+                } else if matches!(left, IRObj::None) {
+                    panic!("Cannot use void type as an operand")
                 }
 
                 let right = land_exp.parse_var_exp();
@@ -68,23 +67,29 @@ impl Expression for LOrExp {
                     if *v != 0 {
                         return IRObj::Const(1);
                     }
+                } else if matches!(right, IRObj::None) {
+                    panic!("Cannot use void type as an operand")
+                }
+
+                // constant folding
+                if let (IRObj::Const(left_val), IRObj::Const(right_val)) = (left.clone(), right.clone()) {
+                    return IRObj::Const((left_val != 0 || right_val != 0).into());
                 }
 
                 let koopa_op = match lor_op {
                     LOrOp::Or => KoopaOpCode::OR,
                 };
 
-                let ir_obj = IRObj::IRVar(
+                let ir_obj = IRObj::IRVar((
                     IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                );
+                    SC_CONTEXT_STACK
+                        .with(|stack| stack.borrow().get_current_dfg().borrow().get_next_inst_id()),
+                ));
                 insert_ir(InstData::new(
                     BType::Int,
                     ir_obj.clone(),
                     koopa_op,
-                    vec![
-                        crate::ir::koopa::Operand::from_parse_result(left),
-                        crate::ir::koopa::Operand::from_parse_result(right),
-                    ],
+                    vec![left, right],
                 ));
                 ir_obj
             }
@@ -149,7 +154,9 @@ impl Expression for LAndExp {
                 eq_exp,
             } => {
                 let left = land_exp.parse_var_exp();
-                // perform short-circuit evaluation for logical AND
+                if matches!(left, IRObj::None) {
+                    panic!("Cannot use void type as an operand")
+                }
                 if let IRObj::Const(v) = &left {
                     if *v == 0 {
                         return IRObj::Const(0);
@@ -157,27 +164,33 @@ impl Expression for LAndExp {
                 }
 
                 let right = eq_exp.parse_var_exp();
+                if matches!(right, IRObj::None) {
+                    panic!("Cannot use void type as an operand")
+                }
                 if let IRObj::Const(v) = &right {
                     if *v == 0 {
                         return IRObj::Const(0);
                     }
                 }
 
+                if let (IRObj::Const(left_val), IRObj::Const(right_val)) = (left.clone(), right.clone()) {
+                    return IRObj::Const((left_val != 0 && right_val != 0).into());
+                }
+
                 let koopa_op = match land_op {
                     LAndOp::And => KoopaOpCode::AND,
                 };
 
-                let ir_obj = IRObj::IRVar(
+                let ir_obj = IRObj::IRVar((
                     IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                );
+                    SC_CONTEXT_STACK
+                        .with(|stack| stack.borrow().get_current_dfg().borrow().get_next_inst_id()),
+                ));
                 insert_ir(InstData::new(
                     BType::Int,
                     ir_obj.clone(),
                     koopa_op,
-                    vec![
-                        crate::ir::koopa::Operand::from_parse_result(left),
-                        crate::ir::koopa::Operand::from_parse_result(right),
-                    ],
+                    vec![left, right],
                 ));
                 ir_obj
             }
@@ -225,33 +238,44 @@ pub enum EqExp {
 impl Expression for EqExp {
     fn parse_var_exp(&self) -> IRObj {
         match self {
-            EqExp::RelExp { rel_exp } => {
-                return rel_exp.parse_var_exp();
-            }
+            EqExp::RelExp { rel_exp } => rel_exp.parse_var_exp(),
             EqExp::EqExp {
                 eq_exp,
                 eq_op,
                 rel_exp,
             } => {
                 let left = eq_exp.parse_var_exp();
+                if matches!(left, IRObj::None) {
+                    panic!("Cannot use void type as an operand")
+                }
                 let right = rel_exp.parse_var_exp();
+                if matches!(right, IRObj::None) {
+                    panic!("Cannot use void type as an operand")
+                }
+
+                if let (IRObj::Const(left_val), IRObj::Const(right_val)) = (left.clone(), right.clone()) {
+                    let res = match eq_op {
+                        EqOp::Eq => left_val == right_val,
+                        EqOp::Ne => left_val != right_val,
+                    };
+                    return IRObj::Const(if res { 1 } else { 0 });
+                }
 
                 let koopa_op = match eq_op {
                     EqOp::Eq => KoopaOpCode::EQ,
                     EqOp::Ne => KoopaOpCode::NE,
                 };
 
-                let ir_obj = IRObj::IRVar(
+                let ir_obj = IRObj::IRVar((
                     IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                );
+                    SC_CONTEXT_STACK
+                        .with(|stack| stack.borrow().get_current_dfg().borrow().get_next_inst_id()),
+                ));
                 insert_ir(InstData::new(
                     BType::Int,
                     ir_obj.clone(),
                     koopa_op,
-                    vec![
-                        crate::ir::koopa::Operand::from_parse_result(left),
-                        crate::ir::koopa::Operand::from_parse_result(right),
-                    ],
+                    vec![left, right],
                 ));
                 ir_obj
             }
@@ -303,16 +327,30 @@ pub enum RelExp {
 impl Expression for RelExp {
     fn parse_var_exp(&self) -> IRObj {
         match self {
-            RelExp::AddExp { add_exp } => {
-                return add_exp.parse_var_exp();
-            }
+            RelExp::AddExp { add_exp } => add_exp.parse_var_exp(),
             RelExp::RelExp {
                 rel_exp,
                 rel_op,
                 add_exp,
             } => {
                 let left = rel_exp.parse_var_exp();
+                if matches!(left, IRObj::None) {
+                    panic!("Cannot use void type as an operand")
+                }
                 let right = add_exp.parse_var_exp();
+                if matches!(right, IRObj::None) {
+                    panic!("Cannot use void type as an operand")
+                }
+
+                if let (IRObj::Const(left_val), IRObj::Const(right_val)) = (left.clone(), right.clone()) {
+                    let res = match rel_op {
+                        RelOp::Lt => left_val < right_val,
+                        RelOp::Gt => left_val > right_val,
+                        RelOp::Le => left_val <= right_val,
+                        RelOp::Ge => left_val >= right_val,
+                    };
+                    return IRObj::Const(if res { 1 } else { 0 });
+                }
 
                 let koopa_op = match rel_op {
                     RelOp::Lt => KoopaOpCode::LT,
@@ -321,17 +359,16 @@ impl Expression for RelExp {
                     RelOp::Ge => KoopaOpCode::GE,
                 };
 
-                let ir_obj = IRObj::IRVar(
+                let ir_obj = IRObj::IRVar((
                     IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                );
+                    SC_CONTEXT_STACK
+                        .with(|stack| stack.borrow().get_current_dfg().borrow().get_next_inst_id()),
+                ));
                 insert_ir(InstData::new(
                     BType::Int,
                     ir_obj.clone(),
                     koopa_op,
-                    vec![
-                        crate::ir::koopa::Operand::from_parse_result(left),
-                        crate::ir::koopa::Operand::from_parse_result(right),
-                    ],
+                    vec![left, right],
                 ));
                 ir_obj
             }
@@ -375,6 +412,10 @@ pub enum UnaryExp {
     PrimaryExp {
         exp: Box<PrimaryExp>,
     },
+    FunctionCall {
+        ident: String,
+        args: Vec<Exp>,
+    },
     UnaryExp {
         unary_op: UnaryOp,
         unary_exp: Box<UnaryExp>,
@@ -385,8 +426,53 @@ impl Expression for UnaryExp {
     fn parse_var_exp(&self) -> IRObj {
         match self {
             // handle primary expression
-            UnaryExp::PrimaryExp { exp } => {
-                return exp.parse_var_exp();
+            UnaryExp::PrimaryExp { exp } => exp.parse_var_exp(),
+
+            UnaryExp::FunctionCall { ident, args } => {
+                let func_def =
+                    SC_CONTEXT_STACK.with(|stack| stack.borrow().get_func_def(ident.clone()));
+                let (params, func_type) = (func_def.params, func_def.func_type);
+
+                if args.len() != params.len() {
+                    panic!(
+                        "Arguments number mismatch in function call: expected {}, got {}",
+                        params.len(),
+                        args.len()
+                    );
+                }
+
+                if params
+                    .iter()
+                    .any(|param| !matches!(param.param_type, BType::Int))
+                {
+                    panic!("Argument type mismatch occurred");
+                }
+
+                let ir_args = args
+                    .iter()
+                    .map(|arg| arg.parse_var_exp())
+                    .collect::<Vec<IRObj>>();
+
+                let ir_obj = match func_type {
+                    BType::Void => IRObj::None,
+                    _ => IRObj::IRVar((
+                        IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
+                        SC_CONTEXT_STACK.with(|stack| {
+                            stack.borrow().get_current_dfg().borrow().get_next_inst_id()
+                        }),
+                    )),
+                };
+
+                insert_ir(InstData::new(
+                    match ir_obj {
+                        IRObj::None => BType::Void,
+                        _ => BType::Int,
+                    },
+                    ir_obj.clone(),
+                    KoopaOpCode::CALL,
+                    vec![IRObj::FuncSym(ident.clone()), IRObj::Args(ir_args)],
+                ));
+                ir_obj
             }
 
             // handle unary operation
@@ -396,12 +482,23 @@ impl Expression for UnaryExp {
             } => {
                 let parse_result = unary_exp.parse_var_exp();
 
+                if let IRObj::Const(res) = parse_result {
+                    return match unary_op {
+                        UnaryOp::Plus => IRObj::Const(res),
+                        UnaryOp::Minus => IRObj::Const(-res),
+                        UnaryOp::Not => IRObj::Const(if res == 0 { 1 } else { 0 }),
+                    };
+                }
+
                 match unary_op {
                     UnaryOp::Plus => parse_result,
                     UnaryOp::Minus | UnaryOp::Not => {
-                        let ir_obj = IRObj::IRVar(
+                        let ir_obj = IRObj::IRVar((
                             IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                        );
+                            SC_CONTEXT_STACK.with(|stack| {
+                                stack.borrow().get_current_dfg().borrow().get_next_inst_id()
+                            }),
+                        ));
                         insert_ir(InstData::new(
                             BType::Int,
                             ir_obj.clone(),
@@ -410,10 +507,7 @@ impl Expression for UnaryExp {
                                 UnaryOp::Not => KoopaOpCode::EQ,
                                 _ => unreachable!(),
                             },
-                            vec![
-                                crate::ir::koopa::Operand::Const(0),
-                                crate::ir::koopa::Operand::from_parse_result(parse_result),
-                            ],
+                            vec![IRObj::Const(0), parse_result],
                         ));
                         ir_obj
                     }
@@ -427,6 +521,15 @@ impl Expression for UnaryExp {
             UnaryExp::PrimaryExp { exp } => {
                 return exp.parse_const_exp();
             }
+
+            // const exp couldn't contain function calls
+            UnaryExp::FunctionCall { ident, args } => {
+                panic!(
+                    "Function call {} with arguments {:?} cannot be evaluated as a constant expression",
+                    ident, args
+                );
+            }
+
             UnaryExp::UnaryExp {
                 unary_op,
                 unary_exp,
@@ -460,16 +563,29 @@ pub enum MulExp {
 impl Expression for MulExp {
     fn parse_var_exp(&self) -> IRObj {
         match self {
-            MulExp::UnaryExp { unary_exp } => {
-                return unary_exp.parse_var_exp();
-            }
+            MulExp::UnaryExp { unary_exp } => unary_exp.parse_var_exp(),
             MulExp::MulExp {
                 mul_exp,
                 mul_op,
                 unary_exp,
             } => {
                 let left = mul_exp.parse_var_exp();
+                if matches!(left, IRObj::None) {
+                    panic!("Cannot use void type as an operand")
+                }
                 let right = unary_exp.parse_var_exp();
+                if matches!(right, IRObj::None) {
+                    panic!("Cannot use void type as an operand")
+                }
+
+                if let (IRObj::Const(left_val), IRObj::Const(right_val)) = (left.clone(), right.clone()) {
+                    let res = match mul_op {
+                        MulOp::Mul => left_val * right_val,
+                        MulOp::Div => left_val / right_val,
+                        MulOp::Mod => left_val % right_val,
+                    };
+                    return IRObj::Const(res);
+                }
 
                 let koopa_op = match mul_op {
                     MulOp::Mul => KoopaOpCode::MUL,
@@ -477,17 +593,16 @@ impl Expression for MulExp {
                     MulOp::Mod => KoopaOpCode::MOD,
                 };
 
-                let ir_obj = IRObj::IRVar(
+                let ir_obj = IRObj::IRVar((
                     IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                );
+                    SC_CONTEXT_STACK
+                        .with(|stack| stack.borrow().get_current_dfg().borrow().get_next_inst_id()),
+                ));
                 insert_ir(InstData::new(
                     BType::Int,
                     ir_obj.clone(),
                     koopa_op,
-                    vec![
-                        crate::ir::koopa::Operand::from_parse_result(left),
-                        crate::ir::koopa::Operand::from_parse_result(right),
-                    ],
+                    vec![left, right],
                 ));
                 ir_obj
             }
@@ -549,24 +664,37 @@ impl Expression for AddExp {
                 mul_exp,
             } => {
                 let left = add_exp.parse_var_exp();
+                if matches!(left, IRObj::None) {
+                    panic!("Cannot use void type as an operand")
+                }
                 let right = mul_exp.parse_var_exp();
+                if matches!(right, IRObj::None) {
+                    panic!("Cannot use void type as an operand")
+                }
+
+                if let (IRObj::Const(left_val), IRObj::Const(right_val)) = (left.clone(), right.clone()) {
+                    let res = match add_op {
+                        AddOp::Add => left_val + right_val,
+                        AddOp::Sub => left_val - right_val,
+                    };
+                    return IRObj::Const(res);
+                }
 
                 let koopa_op = match add_op {
                     AddOp::Add => KoopaOpCode::ADD,
                     AddOp::Sub => KoopaOpCode::SUB,
                 };
 
-                let ir_obj = IRObj::IRVar(
+                let ir_obj = IRObj::IRVar((
                     IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                );
+                    SC_CONTEXT_STACK
+                        .with(|stack| stack.borrow().get_current_dfg().borrow().get_next_inst_id()),
+                ));
                 insert_ir(InstData::new(
                     BType::Int,
                     ir_obj.clone(),
                     koopa_op,
-                    vec![
-                        crate::ir::koopa::Operand::from_parse_result(left),
-                        crate::ir::koopa::Operand::from_parse_result(right),
-                    ],
+                    vec![left, right],
                 ));
                 ir_obj
             }
@@ -620,9 +748,9 @@ impl Expression for PrimaryExp {
                 match SC_CONTEXT_STACK
                     .with(|stack| stack.borrow().find_highest_priority(&l_val.ident))
                 {
-                    Some(IRObj::Pointer {
+                    Some(IRObj::ScVar {
                         initialized,
-                        pointer_id,
+                        sc_var_id,
                     }) => {
                         // this case the variables wasn't loaded before use
                         if !initialized {
@@ -630,22 +758,54 @@ impl Expression for PrimaryExp {
                         }
 
                         // if it's a variable stored in memory, load first and return inst_id.
-                        let ir_obj = IRObj::IRVar(
+                        let ir_obj = IRObj::IRVar((
                             IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                        );
+                            SC_CONTEXT_STACK.with(|stack| {
+                                stack.borrow().get_current_dfg().borrow().get_next_inst_id()
+                            }),
+                        ));
                         insert_ir(InstData::new(
                             BType::Int,
                             ir_obj.clone(),
                             KoopaOpCode::LOAD,
-                            vec![crate::ir::koopa::Operand::Pointer(pointer_id)],
+                            vec![IRObj::ScVar {
+                                initialized,
+                                sc_var_id,
+                            }],
                         ));
                         ir_obj
                     }
+
                     Some(IRObj::Const(value)) => IRObj::Const(value),
+
+                    Some(IRObj::GlobalVar {
+                        initialized,
+                        global_var_id,
+                        init_val,
+                    }) => {
+                        // globa var has been initialized before use
+                        let ir_obj = IRObj::IRVar((
+                            IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
+                            SC_CONTEXT_STACK.with(|stack| {
+                                stack.borrow().get_current_dfg().borrow().get_next_inst_id()
+                            }),
+                        ));
+                        insert_ir(InstData::new(
+                            BType::Int,
+                            ir_obj.clone(),
+                            KoopaOpCode::LOAD,
+                            vec![IRObj::GlobalVar {
+                                initialized,
+                                global_var_id,
+                                init_val,
+                            }],
+                        ));
+                        ir_obj
+                    }
+
                     _ => {
                         panic!(
-                            "LVal {} not found in var table, maybe the ident is not defined",
-                            l_val
+                            "LVal {l_val} not found in var table, maybe the ident is not defined"
                         );
                     }
                 }
@@ -664,7 +824,7 @@ impl Expression for PrimaryExp {
                 {
                     value
                 } else {
-                    panic!("LVal {} not found in const table, maybe the ident is for a variable or not defined", l_val);
+                    panic!("LVal {l_val} not found in const table, maybe the ident is for a variable or not defined");
                 }
             }
         }

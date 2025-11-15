@@ -1,7 +1,7 @@
 use crate::global::config::BType;
 use crate::global::context::SC_CONTEXT_STACK;
-use crate::ir::config::{IRObj, KoopaOpCode};
-use crate::ir::koopa::{insert_ir, BasicBlock, BasicBlockType, InstData, Operand};
+use crate::ir::config::KoopaOpCode;
+use crate::ir::koopa::{insert_ir, BasicBlock, BasicBlockType, IRObj, InstData};
 use crate::sc::ast::{Block, LVal};
 use crate::sc::exp::{Exp, Expression};
 
@@ -38,13 +38,13 @@ pub trait ConditionStatement {
     fn parse_single_condition(&self) {
         let result = self.condition().parse_var_exp();
         match result {
-            IRObj::IRVar(inst_id) => {
+            IRObj::IRVar(_) => {
                 let br_id = insert_ir(InstData::new(
                     BType::Void,
                     IRObj::None,
                     KoopaOpCode::BR,
                     vec![
-                        Operand::InstId(inst_id),
+                        result,
                         // we would add label(block id) here later
                     ],
                 ));
@@ -85,14 +85,12 @@ pub trait ConditionStatement {
                     dfg_mut.append_operands(
                         br_id,
                         vec![
-                            Operand::BlockId(then_block.get_block_id()),
-                            Operand::BlockId(end_block.get_block_id()),
+                            IRObj::FuncSym(then_block.get_block_id()),
+                            IRObj::FuncSym(end_block.get_block_id()),
                         ],
                     );
-                    dfg_mut.append_operands(
-                        jump_id,
-                        vec![Operand::BlockId(end_block.get_block_id())],
-                    );
+                    dfg_mut
+                        .append_operands(jump_id, vec![IRObj::FuncSym(end_block.get_block_id())]);
                 });
             }
 
@@ -136,22 +134,18 @@ pub trait ConditionStatement {
                         let mut dfg_mut = dfg.borrow_mut();
                         dfg_mut.append_operands(
                             jump_then,
-                            vec![Operand::BlockId(then_block.get_block_id())],
+                            vec![IRObj::FuncSym(then_block.get_block_id())],
                         );
                         dfg_mut.append_operands(
                             jump_end,
-                            vec![Operand::BlockId(end_block.get_block_id())],
+                            vec![IRObj::FuncSym(end_block.get_block_id())],
                         );
                     });
                 }
             }
 
-            IRObj::Pointer {
-                initialized: _,
-                pointer_id: _,
-            } => unreachable!("Pointer branch is unreachable in condition expression"),
-            IRObj::None => {
-                unreachable!("None branch is unreachable in condition expression")
+            _ => {
+                unreachable!("{:#?} is unreachable in condition expression", result)
             }
         }
     }
@@ -165,7 +159,7 @@ pub trait ConditionStatement {
                     IRObj::None,
                     KoopaOpCode::BR,
                     vec![
-                        Operand::InstId(inst_id),
+                        IRObj::IRVar(inst_id),
                         // we would add label(block id) here later
                     ],
                 ));
@@ -222,17 +216,17 @@ pub trait ConditionStatement {
                     dfg_mut.append_operands(
                         br_id,
                         vec![
-                            Operand::BlockId(then_block.get_block_id()),
-                            Operand::BlockId(else_block.get_block_id()),
+                            IRObj::FuncSym(then_block.get_block_id()),
+                            IRObj::FuncSym(else_block.get_block_id()),
                         ],
                     );
                     dfg_mut.append_operands(
                         then_to_end,
-                        vec![Operand::BlockId(end_block.get_block_id())],
+                        vec![IRObj::FuncSym(end_block.get_block_id())],
                     );
                     dfg_mut.append_operands(
                         else_to_end,
-                        vec![Operand::BlockId(end_block.get_block_id())],
+                        vec![IRObj::FuncSym(end_block.get_block_id())],
                     );
                 });
             }
@@ -277,11 +271,11 @@ pub trait ConditionStatement {
                         let mut dfg_mut = dfg.borrow_mut();
                         dfg_mut.append_operands(
                             jump_then,
-                            vec![Operand::BlockId(then_block.get_block_id())],
+                            vec![IRObj::FuncSym(then_block.get_block_id())],
                         );
                         dfg_mut.append_operands(
                             jump_end,
-                            vec![Operand::BlockId(end_block.get_block_id())],
+                            vec![IRObj::FuncSym(end_block.get_block_id())],
                         );
                     });
                 } else {
@@ -322,24 +316,17 @@ pub trait ConditionStatement {
                         let mut dfg_mut = dfg.borrow_mut();
                         dfg_mut.append_operands(
                             jump_else,
-                            vec![Operand::BlockId(else_block.get_block_id())],
+                            vec![IRObj::FuncSym(else_block.get_block_id())],
                         );
                         dfg_mut.append_operands(
                             jump_end,
-                            vec![Operand::BlockId(end_block.get_block_id())],
+                            vec![IRObj::FuncSym(end_block.get_block_id())],
                         );
                     });
                 }
             }
 
-            IRObj::Pointer {
-                initialized: _,
-                pointer_id: _,
-            } => unreachable!("Pointer branch is unreachable in condition expression"),
-
-            IRObj::None => {
-                unreachable!("None branch is unreachable in condition expression")
-            }
+            _ => unreachable!("{:#?} is unreachable in condition expression", result),
         }
     }
 }
@@ -387,19 +374,12 @@ pub trait WhileStatement {
         // parse as usual
         let result = self.condition().parse_var_exp();
         let entry_end_inst = match result {
-            IRObj::IRVar(inst_id) => {
-                insert_ir(InstData::new(
-                    BType::Void,
-                    IRObj::None,
-                    KoopaOpCode::BR,
-                    vec![
-                        Operand::InstId(inst_id),
-                        // we would add label(block id) here later
-                    ],
-                ))
-            }
-
-            // if the condition is a constant, we can directly decide whether to execute body_stmt
+            IRObj::IRVar(inst_id) => insert_ir(InstData::new(
+                BType::Void,
+                IRObj::None,
+                KoopaOpCode::BR,
+                vec![IRObj::IRVar(inst_id)],
+            )),
             IRObj::Const(_) => insert_ir(InstData::new(
                 BType::Void,
                 IRObj::None,
@@ -407,14 +387,7 @@ pub trait WhileStatement {
                 vec![],
             )),
 
-            IRObj::Pointer {
-                initialized: _,
-                pointer_id: _,
-            } => unreachable!("Pointer branch is unreachable in condition expression"),
-
-            IRObj::None => {
-                unreachable!("None branch is unreachable in condition expression")
-            }
+            _ => unreachable!("{:#?} is unreachable in condition expression", result),
         };
 
         let while_body = Rc::new(BasicBlock::new(BasicBlockType::WhileBody));
@@ -461,8 +434,8 @@ pub trait WhileStatement {
                             entry_end_inst,
                             match opcode {
                                 KoopaOpCode::BR => vec![
-                                    Operand::BlockId(while_body.get_block_id()),
-                                    Operand::BlockId(end_block.get_block_id()),
+                                    IRObj::FuncSym(while_body.get_block_id()),
+                                    IRObj::FuncSym(end_block.get_block_id()),
                                 ],
                                 _ => unreachable!("entry_end_inst should be BR"),
                             },
@@ -470,7 +443,7 @@ pub trait WhileStatement {
 
                         dfg_mut.append_operands(
                             jump_to_entry,
-                            vec![Operand::BlockId(while_entry.get_block_id())], // const condition always jumps to body
+                            vec![IRObj::FuncSym(while_entry.get_block_id())], // const condition always jumps to body
                         );
                     }
 
@@ -513,7 +486,7 @@ pub trait WhileStatement {
                                 entry_end_inst,
                                 match opcode {
                                     KoopaOpCode::JUMP => {
-                                        vec![Operand::BlockId(while_body.get_block_id())]
+                                        vec![IRObj::FuncSym(while_body.get_block_id())]
                                     }
                                     _ => unreachable!("entry_end_inst should be JUMP"),
                                 },
@@ -522,7 +495,7 @@ pub trait WhileStatement {
                             // append jump back to while_entry
                             dfg_mut.append_operands(
                                 jump_to_entry,
-                                vec![Operand::BlockId(while_entry.get_block_id())], // const condition always jumps to body
+                                vec![IRObj::FuncSym(while_entry.get_block_id())], // const condition always jumps to body
                             );
                         }
 
@@ -546,7 +519,7 @@ pub trait WhileStatement {
                             entry_end_inst,
                             match opcode {
                                 KoopaOpCode::JUMP => {
-                                    vec![Operand::BlockId(while_body.get_block_id())]
+                                    vec![IRObj::FuncSym(while_body.get_block_id())]
                                 }
                                 _ => unreachable!("entry_end_inst should be JUMP"),
                             },
@@ -555,16 +528,7 @@ pub trait WhileStatement {
                 }
             }
 
-            IRObj::Pointer {
-                initialized: _,
-                pointer_id: _,
-            } => {
-                unreachable!("Pointer branch is unreachable in condition expression")
-            }
-
-            IRObj::None => {
-                unreachable!("None branch is unreachable in condition expression")
-            }
+            _ => unreachable!("{:#?} is unreachable in condition expression", result),
         }
     }
 }
@@ -739,7 +703,7 @@ pub enum SimpleStmt {
     Block { block: Box<Block> },
     Break,
     Continue,
-    ReturnStmt { exp: Exp },
+    ReturnStmt { exp: Option<Exp> },
 }
 
 impl Statement for SimpleStmt {
@@ -753,14 +717,14 @@ impl Statement for SimpleStmt {
                 {
                     panic!("Cannot assign to a constant variable");
                 } else if SC_CONTEXT_STACK
-                    .with(|stack| stack.borrow().get_latest_pointer(l_val.ident.as_str()))
+                    .with(|stack| stack.borrow().get_latest_var(l_val.ident.as_str()))
                     .is_none()
                 {
                     panic!("Variable {} not declared", l_val.ident);
                 }
 
-                let pointer = SC_CONTEXT_STACK
-                    .with(|stack| stack.borrow().get_latest_pointer(l_val.ident.as_str()))
+                let var = SC_CONTEXT_STACK
+                    .with(|stack| stack.borrow().get_latest_var(l_val.ident.as_str()))
                     .unwrap();
                 let result = exp.parse_var_exp();
 
@@ -770,38 +734,31 @@ impl Statement for SimpleStmt {
                     KoopaOpCode::STORE,
                     vec![
                         match result {
-                            IRObj::IRVar(id) => Operand::InstId(id),
-                            IRObj::Const(value) => Operand::Const(value),
-                            IRObj::Pointer {
-                                initialized: _,
-                                pointer_id: _,
-                            } => unreachable!("Pointer branch is unreachable in STORE"),
-                            IRObj::None => panic!("Cannot store void value"),
+                            IRObj::IRVar(id) => IRObj::IRVar(id),
+                            IRObj::Const(value) => IRObj::Const(value),
+                            _ => {
+                                unreachable!("{:#?} is unreachable in STORE", result)
+                            }
                         },
-                        match pointer {
-                            IRObj::Pointer {
-                                initialized: _,
-                                pointer_id,
-                            } => Operand::Pointer(pointer_id),
-                            _ => panic!("Expected a pointer for l_val {}", l_val.ident),
+                        match var {
+                            IRObj::ScVar { .. } | IRObj::GlobalVar { .. } => var.clone(),
+                            _ => panic!("Expected a sc_var for l_val {}", l_val.ident),
                         },
                     ],
                 ));
 
-                // set_pointer_initialized
-                SC_CONTEXT_STACK.with(|stack| {
-                    stack
-                        .borrow_mut()
-                        .set_pointer_initialized(l_val.ident.as_str())
-                });
+                // set_sc_var_initialized
+                if matches!(var, IRObj::ScVar { .. }) {
+                    SC_CONTEXT_STACK.with(|stack| {
+                        stack
+                            .borrow_mut()
+                            .set_sc_var_initialized(l_val.ident.as_str())
+                    });
+                }
             }
 
             // is it necessary?
-            SimpleStmt::RawExp { exp } => {
-                if let Some(e) = exp {
-                    let _ = e.parse_var_exp();
-                }
-            }
+            SimpleStmt::RawExp { .. } => {}
 
             SimpleStmt::Block { block } => {
                 SC_CONTEXT_STACK.with(|stack| stack.borrow_mut().enter_scope());
@@ -880,11 +837,10 @@ impl Statement for SimpleStmt {
                     IRObj::None,
                     KoopaOpCode::JUMP,
                     vec![],
-                )); 
+                ));
 
                 // add current continue inst to the loop context
-                SC_CONTEXT_STACK
-                    .with(|stack| stack.borrow_mut().add_new_continue(continue_inst));
+                SC_CONTEXT_STACK.with(|stack| stack.borrow_mut().add_new_continue(continue_inst));
 
                 let end_block = Rc::new(BasicBlock::new(BasicBlockType::Normal));
                 SC_CONTEXT_STACK.with(|stack| {
@@ -897,21 +853,23 @@ impl Statement for SimpleStmt {
             }
 
             SimpleStmt::ReturnStmt { exp } => {
-                let result = exp.parse_var_exp();
+                let result = match exp {
+                    Some(exp) => exp.parse_var_exp(),
+                    None => IRObj::None,
+                };
 
                 insert_ir(InstData::new(
                     BType::Void,
                     IRObj::None,
                     KoopaOpCode::RET,
-                    vec![match result {
-                        IRObj::IRVar(id) => Operand::InstId(id),
-                        IRObj::Const(value) => Operand::Const(value),
-                        IRObj::Pointer {
-                            initialized: _,
-                            pointer_id: _,
-                        } => unimplemented!(),
-                        IRObj::None => Operand::None,
-                    }],
+                    match result {
+                        IRObj::None => vec![],
+                        _ => vec![match result {
+                            IRObj::IRVar(id) => IRObj::IRVar(id),
+                            IRObj::Const(value) => IRObj::Const(value),
+                            _ => unreachable!("{:#?} is unreachable in return statement", result),
+                        }],
+                    },
                 ));
             }
         }

@@ -1,6 +1,7 @@
+use crate::global::config::BType;
+use crate::sc::ast::{Block, FuncDef, FuncFParam};
 use std::cell::RefCell;
-
-use crate::ir::koopa::InstId;
+use std::vec::Vec;
 
 #[derive(Debug, Clone)]
 pub enum KoopaOpCode {
@@ -24,6 +25,7 @@ pub enum KoopaOpCode {
     STORE,
     LOAD,
     ALLOC, // store, load & ALLOC
+    CALL,
     BR,
     JUMP,
     RET,
@@ -52,39 +54,10 @@ impl std::fmt::Display for KoopaOpCode {
             KoopaOpCode::STORE => write!(f, "store"),
             KoopaOpCode::LOAD => write!(f, "load"),
             KoopaOpCode::ALLOC => write!(f, "alloc"),
+            KoopaOpCode::CALL => write!(f, "call"),
             KoopaOpCode::BR => write!(f, "br"),
             KoopaOpCode::JUMP => write!(f, "jump"),
             KoopaOpCode::RET => write!(f, "ret"),
-        }
-    }
-}
-
-impl KoopaOpCode {
-    pub fn has_return_value(&self) -> bool {
-        match self {
-            // These opcodes produce a return value
-            KoopaOpCode::NE
-            | KoopaOpCode::EQ
-            | KoopaOpCode::GT
-            | KoopaOpCode::LT
-            | KoopaOpCode::GE
-            | KoopaOpCode::LE
-            | KoopaOpCode::ADD
-            | KoopaOpCode::SUB
-            | KoopaOpCode::MUL
-            | KoopaOpCode::DIV
-            | KoopaOpCode::MOD
-            | KoopaOpCode::AND
-            | KoopaOpCode::OR
-            | KoopaOpCode::XOR
-            | KoopaOpCode::SHL
-            | KoopaOpCode::SHR
-            | KoopaOpCode::SAR
-            | KoopaOpCode::LOAD
-            | KoopaOpCode::ALLOC => true,
-
-            // These opcodes do not produce a return value
-            KoopaOpCode::STORE | KoopaOpCode::RET | KoopaOpCode::BR | KoopaOpCode::JUMP => false,
         }
     }
 }
@@ -110,49 +83,80 @@ impl IdAllocator {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum IRObj {
-    IRVar(u32), // temp variable, display in format "%id"
-    Const(i32),     // constant value, display in literal
-    Pointer { initialized: bool, pointer_id: u32 }, // pointer to a variable in memory, display in format "@pointer_id"
-    None,
-}
-
-impl IRObj {
-    pub fn get_value(&self) -> i32 {
-        match self {
-            IRObj::Const(v) => *v,
-            _ => panic!("Not a constant value: {:?}", self),
-        }
-    }
-
-    pub fn get_id(&self) -> InstId {
-        match self {
-            IRObj::IRVar(id) => *id,
-            _ => panic!("Not an instruction ID: {:?}", self),
-        }
-    }
-}
-
-impl ToString for IRObj {
-    fn to_string(&self) -> String {
-        match self {
-            IRObj::IRVar(id) => format!("%{}", id),
-            IRObj::Const(c) => format!("{}", c),
-            IRObj::Pointer {
-                initialized: _,
-                pointer_id,
-            } => format!("@{}", pointer_id),
-            IRObj::None => "".to_string(),
-        }
-    }
-}
-
 thread_local! {
-    // initialize pointer id allocator
+    // initialize sc_var id allocator
     pub static PTR_ID_ALLOCATOR: RefCell<IdAllocator> = RefCell::new(IdAllocator::new());
     // initialize koopa ir block id allocator
     pub static BLOCK_ID_ALLOCATOR: RefCell<IdAllocator> = RefCell::new(IdAllocator::new());
     // initialize ir inst id allocator
     pub static IR_VAR_ID_ALLOCATOR: RefCell<IdAllocator> = RefCell::new(IdAllocator::new());
+    // sysy standard library function declarations
+    pub static SYSY_STD_LIB: Vec<FuncDef> = vec![
+        FuncDef {
+            func_type: BType::Int,
+            ident: "getint".to_string(),
+            params: vec![],
+            block: Block { block_items: vec![] },
+        },
+        FuncDef {
+            func_type: BType::Int,
+            ident: "getch".to_string(),
+            params: vec![],
+            block: Block { block_items: vec![] },
+        },
+        FuncDef {
+            func_type: BType::Int,
+            ident: "getarray".to_string(),
+            params: vec![FuncFParam {
+                param_type: BType::Pointer(Box::new(BType::Int)),
+                ident: "".to_string(),
+            }],
+            block: Block { block_items: vec![] },
+        },
+        FuncDef {
+            func_type: BType::Void,
+            ident: "putint".to_string(),
+            params: vec![FuncFParam {
+                param_type: BType::Int,
+                ident: "".to_string(),
+            }],
+            block: Block { block_items: vec![] },
+        },
+        FuncDef {
+            func_type: BType::Void,
+            ident: "putch".to_string(),
+            params: vec![FuncFParam {
+                param_type: BType::Int,
+                ident: "".to_string(),
+            }],
+            block: Block { block_items: vec![] },
+        },
+        FuncDef {
+            func_type: BType::Void,
+            ident: "putarray".to_string(),
+            params: vec![
+                FuncFParam {
+                    param_type: BType::Int,
+                    ident: "".to_string(),
+                },
+                FuncFParam {
+                    param_type: BType::Pointer(Box::new(BType::Int)),
+                    ident: "".to_string(),
+                },
+            ],
+            block: Block { block_items: vec![] },
+        },
+        FuncDef {
+            func_type: BType::Void,
+            ident: "starttime".to_string(),
+            params: vec![],
+            block: Block { block_items: vec![] },
+        },
+        FuncDef {
+            func_type: BType::Void,
+            ident: "stoptime".to_string(),
+            params: vec![],
+            block: Block { block_items: vec![] },
+        },
+    ];
 }

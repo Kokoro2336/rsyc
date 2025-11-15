@@ -2,8 +2,8 @@ use crate::asm::config::RVRegCode;
 use crate::asm::reg::RVREG_ALLOCATOR;
 use crate::global::config::BType;
 use crate::global::context::SC_CONTEXT_STACK;
-use crate::ir::config::IRObj;
-use crate::ir::config::{KoopaOpCode, BLOCK_ID_ALLOCATOR};
+use crate::ir::config::{KoopaOpCode, BLOCK_ID_ALLOCATOR, SYSY_STD_LIB};
+use crate::sc::ast::FuncFParam;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 #[derive(Clone)]
 pub struct Program {
-    pub global_vals: Vec<KoopaGlobalVal>,
+    pub global_vals: Vec<IRObj>,
     pub funcs: Vec<Rc<Func>>,
 }
 
@@ -23,10 +23,6 @@ impl Program {
         }
     }
 
-    pub fn push_global_val(&mut self, global_val: KoopaGlobalVal) {
-        self.global_vals.push(global_val);
-    }
-
     pub fn push_func(&mut self, func: Rc<Func>) {
         self.funcs.push(func);
     }
@@ -35,15 +31,62 @@ impl Program {
 // customize formatting for Program
 impl std::fmt::Display for Program {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        SYSY_STD_LIB.with(|std_lib| {
+            for func_decl in std_lib.iter() {
+                writeln!(
+                    f,
+                    "decl @{}({}): {}",
+                    func_decl.ident,
+                    func_decl
+                        .params
+                        .iter()
+                        .map(|p| format!("{}", p.param_type))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    func_decl.func_type
+                )?;
+            }
+            Ok(())
+        })?;
+        writeln!(f)?;
+
+        // print global vals
+        for global_val in &self.global_vals {
+            if let IRObj::GlobalVar {
+                initialized,
+                global_var_id,
+                init_val,
+            } = global_val
+            {
+                writeln!(
+                    f,
+                    "global @{} = alloc {}, {}",
+                    global_var_id,
+                    BType::Int,
+                    if *initialized {
+                        init_val.to_string()
+                    } else if !*initialized && *init_val == 0 {
+                        IRObj::ZeroInit.to_string()
+                    } else {
+                        panic!("Invalid global variable initialization")
+                    }
+                )?;
+            } else {
+                panic!("Invalid global value: {:?}", global_val);
+            }
+        }
+        writeln!(f)?;
+
         for func in &self.funcs {
             SC_CONTEXT_STACK.with(|stack| stack.borrow_mut().enter_func(Rc::clone(func)));
-            writeln!(f, "{}", func)?;
+            writeln!(f, "{func}")?;
             SC_CONTEXT_STACK.with(|stack| stack.borrow_mut().exit_func());
         }
         Ok(())
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct DataFlowGraph {
     next_inst_id: InstId,
     pub inst_map: HashMap<InstId, InstData>,
@@ -119,7 +162,7 @@ impl DataFlowGraph {
     }
 
     // api to modify operands of an inst.
-    pub fn append_operands(&mut self, inst_id: InstId, operands: Vec<Operand>) {
+    pub fn append_operands(&mut self, inst_id: InstId, operands: Vec<IRObj>) {
         if let Some(inst) = self.inst_map.get_mut(&inst_id) {
             inst.operands.extend(operands);
         } else {
@@ -131,8 +174,8 @@ impl DataFlowGraph {
     pub fn fill_br(&mut self, inst_id: InstId, block_id1: BlockId, block_id2: BlockId) {
         if let Some(inst) = self.inst_map.get_mut(&inst_id) {
             if inst.operands.len() == 1 {
-                inst.operands.push(Operand::BlockId(block_id1));
-                inst.operands.push(Operand::BlockId(block_id2));
+                inst.operands.push(IRObj::FuncSym(block_id1));
+                inst.operands.push(IRObj::FuncSym(block_id2));
             } else {
                 panic!("Branch instruction already has target blocks");
             }
@@ -144,7 +187,7 @@ impl DataFlowGraph {
     pub fn fill_jump(&mut self, inst_id: InstId, block_id: BlockId) {
         if let Some(inst) = self.inst_map.get_mut(&inst_id) {
             if inst.operands.is_empty() {
-                inst.operands.push(Operand::BlockId(block_id));
+                inst.operands.push(IRObj::FuncSym(block_id));
             } else {
                 panic!("Jump instruction already has target block");
             }
@@ -154,28 +197,11 @@ impl DataFlowGraph {
     }
 }
 
-#[derive(Clone)]
-pub struct KoopaGlobalVal {
-    pub name: String,
-    pub val_type: BType,
-    pub val: i32,
-}
-
-impl KoopaGlobalVal {
-    pub fn new(name: String, val_type: BType, val: i32) -> Self {
-        Self {
-            name,
-            val_type,
-            val,
-        }
-    }
-}
-
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Func {
     pub name: String,
     pub func_type: BType,
-    pub params: Vec<Param>,
+    pub params: Vec<FuncFParam>,
     pub dfg: Rc<RefCell<DataFlowGraph>>,
     pub basic_blocks: Rc<RefCell<Vec<Rc<BasicBlock>>>>,
 }
@@ -200,7 +226,7 @@ impl std::fmt::Display for Func {
 }
 
 impl Func {
-    pub fn new(name: String, func_type: BType, params: Vec<Param>) -> Self {
+    pub fn new(name: String, func_type: BType, params: Vec<FuncFParam>) -> Self {
         Self {
             name,
             func_type,
@@ -214,24 +240,20 @@ impl Func {
         self.basic_blocks.borrow_mut().push(Rc::clone(&block));
     }
 
-    pub fn get_asm_label(&self, block_id: u32) -> String {
-        if let Some(pos) = self
+    pub fn get_asm_label(&self, block_id: BlockId) -> Option<String> {
+        if let Some(block) = self
             .basic_blocks
             .borrow()
             .iter()
-            .position(|block| block.get_block_id() == block_id)
+            .find(|block| block.get_block_id() == block_id)
         {
-            if pos == 0 {
-                self.name.clone()
-            } else {
-                format!(".block_{}", block_id)
-            }
+            Some(block.block_id.clone())
         } else {
-            panic!("Block with id {} doesn't exist.", block_id)
+            None
         }
     }
 
-    pub fn get_block(&self, block_id: u32) -> Rc<BasicBlock> {
+    pub fn get_block(&self, block_id: BlockId) -> Rc<BasicBlock> {
         if let Some(basic_block) = self
             .basic_blocks
             .borrow()
@@ -244,7 +266,7 @@ impl Func {
         }
     }
 
-    pub fn remove_block(&mut self, block_id: u32) {
+    pub fn remove_block(&mut self, block_id: BlockId) {
         let mut blocks = self.basic_blocks.borrow_mut();
         if let Some(pos) = blocks.iter().position(|b| b.block_id == block_id) {
             blocks.remove(pos);
@@ -256,12 +278,12 @@ impl Func {
     pub fn get_params_str(&self) -> String {
         self.params
             .iter()
-            .map(|p| format!("{}: {}", p.name, p.param_type))
+            .map(|p| format!("{}: {}", p.ident, p.param_type))
             .collect::<Vec<_>>()
             .join(", ")
     }
 
-    pub fn change_block_type(&self, block_id: u32, new_type: BasicBlockType) {
+    pub fn change_block_type(&self, block_id: BlockId, new_type: BasicBlockType) {
         let blocks = self.basic_blocks.borrow_mut();
         if let Some(block) = blocks.iter().find(|b| b.block_id == block_id) {
             let mut block_type = block.block_type.borrow_mut();
@@ -271,20 +293,29 @@ impl Func {
         }
     }
 
-    pub fn has_block(&self, block_id: u32) -> bool {
+    pub fn has_block(&self, block_id: BlockId) -> bool {
         let blocks = self.basic_blocks.borrow();
         blocks.iter().any(|b| b.block_id == block_id)
     }
-}
 
-#[derive(Clone)]
-pub struct Param {
-    pub name: String,
-    pub param_type: BType,
+    pub fn end_with_return(&self) -> bool {
+        let blocks = self.basic_blocks.borrow();
+        if let Some(last_block) = blocks.last() {
+            let inst_list = last_block.inst_list.borrow();
+            if let Some(last_inst_id) = inst_list.last() {
+                let dfg = self.dfg.borrow();
+                if let Some(last_inst) = dfg.get_inst(last_inst_id) {
+                    return matches!(last_inst.opcode, KoopaOpCode::RET);
+                }
+            }
+        }
+        false
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum BasicBlockType {
+    FuncEntry,
     Normal,
     If,
     Else,
@@ -294,9 +325,9 @@ pub enum BasicBlockType {
     WhileBody,
 }
 
-pub type BlockId = u32;
+pub type BlockId = String;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct BasicBlock {
     pub block_id: BlockId,
     pub block_type: RefCell<BasicBlockType>,
@@ -307,15 +338,23 @@ pub struct BasicBlock {
 impl BasicBlock {
     pub fn new(block_type: BasicBlockType) -> Self {
         Self {
-            block_id: BLOCK_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
+            block_id: match block_type {
+                BasicBlockType::FuncEntry => {
+                    SC_CONTEXT_STACK.with(|stack| stack.borrow().get_current_func().name.clone())
+                }
+                _ => format!(
+                    "block_{}",
+                    BLOCK_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc())
+                ),
+            },
             block_type: RefCell::new(block_type),
             inst_list: Rc::new(RefCell::new(vec![])),
             jump_to_inst: vec![],
         }
     }
 
-    pub fn get_block_id(&self) -> u32 {
-        self.block_id
+    pub fn get_block_id(&self) -> BlockId {
+        self.block_id.clone()
     }
 
     pub fn get_block_type(&self) -> BasicBlockType {
@@ -325,7 +364,7 @@ impl BasicBlock {
 
 impl std::fmt::Display for BasicBlock {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "%block_{}: ", self.block_id)?;
+        writeln!(f, "%{}: ", self.block_id)?;
 
         let dfg = SC_CONTEXT_STACK.with(|stack| stack.borrow().get_current_dfg());
         let dfg_borrow = dfg.borrow();
@@ -334,18 +373,22 @@ impl std::fmt::Display for BasicBlock {
             let inst_data = dfg_borrow.get_inst(inst).unwrap();
             match inst_data.opcode {
                 KoopaOpCode::RET => {
-                    writeln!(f, "  ret {}", inst_data.operands[0].to_string())?;
+                    if let Some(operand) = inst_data.operands.first() {
+                        writeln!(f, "  ret {}", operand.to_string())?;
+                    } else {
+                        writeln!(f, "  ret")?;
+                    }
                     continue;
                 }
                 _ => {
-                    if let IRObj::IRVar(ir_var_id) = inst_data.ir_obj {
+                    if let IRObj::IRVar((ir_var_id, _)) = inst_data.ir_obj {
                         writeln!(f, "  %{} = {}", ir_var_id, inst_data)?;
-                    } else if let IRObj::Pointer {
+                    } else if let IRObj::ScVar {
                         initialized: _,
-                        pointer_id,
+                        sc_var_id,
                     } = inst_data.ir_obj
                     {
-                        writeln!(f, "  @{} = {}", pointer_id, inst_data)?;
+                        writeln!(f, "  @{} = {}", sc_var_id, inst_data)?;
                     } else {
                         writeln!(f, "  {}", inst_data)?;
                     }
@@ -359,58 +402,101 @@ impl std::fmt::Display for BasicBlock {
 
 /// instruction id for DFG
 pub type InstId = u32;
+pub type IRVarId = u32;
 
 #[derive(Debug, Clone)]
-pub enum Operand {
-    InstId(InstId), // maybe the operand refers to another instruction's result
-    Const(i32),     // maybe the operand is a constant value
-    BType(BType),   // maybe the operand is a type
-    Pointer(u32),
-    BlockId(u32), // block label(using id to represent)
+pub enum IRObj {
+    // regular operands
+    Const(i32),               // maybe the operand is a constant value
+    IRVar((IRVarId, InstId)), // we need to store InstId along with IRVarId for user tracking
+    ScVar {
+        initialized: bool,
+        sc_var_id: u32,
+    }, // sc_var to a variable in memory,
+    GlobalVar {
+        initialized: bool,
+        global_var_id: String,
+        init_val: i32,
+    },
+
+    // special operands
+    ZeroInit,         // zero initializer
+    BType(BType),     // maybe the operand is a type
+    FuncSym(BlockId), // block label(using id to represent)
+
+    // function call
+    Args(Vec<IRObj>), // argument list for call instruction
+    Param {
+        param_type: BType,
+        idx: u32,
+        ident: String,
+    }, // parameters
+
+    // None
     None,
 }
 
-impl Operand {
-    pub fn from_parse_result(parse_result: IRObj) -> Self {
-        match parse_result {
-            IRObj::IRVar(id) => Operand::InstId(id),
-            IRObj::Const(c) => Operand::Const(c),
-            IRObj::Pointer {
-                initialized: _,
-                pointer_id,
-            } => Operand::Pointer(pointer_id),
-            // None matches to void return
-            IRObj::None => {
-                panic!("Cannot convert IRObj::None to Operand")
-            }
+impl IRObj {
+    pub fn get_value(&self) -> i32 {
+        match self {
+            IRObj::Const(v) => *v,
+            _ => panic!("Not a constant value: {:?}", self),
         }
     }
 
-    pub fn to_string(&self) -> String {
+    pub fn get_id(&self) -> InstId {
         match self {
-            Operand::InstId(id) => format!("%{}", id),
-            Operand::Const(c) => format!("{}", c),
-            Operand::BType(b_type) => format!("{}", b_type),
-            Operand::Pointer(pointer) => format!("@{}", pointer),
-            Operand::BlockId(block_id) => format!("%block_{}", block_id),
-            Operand::None => "".to_string(),
+            IRObj::IRVar((id, _)) => *id,
+            _ => panic!("Not an instruction ID: {:?}", self),
         }
     }
 }
 
-#[derive(Clone)]
+impl ToString for IRObj {
+    fn to_string(&self) -> String {
+        match self {
+            IRObj::IRVar((ir_var_id, _)) => format!("%{}", ir_var_id),
+            IRObj::Const(c) => format!("{}", c),
+            IRObj::BType(b_type) => format!("{}", b_type),
+            IRObj::ScVar {
+                initialized: _,
+                sc_var_id,
+            } => format!("@{}", sc_var_id),
+            IRObj::GlobalVar {
+                initialized: _,
+                global_var_id,
+                init_val: _,
+            } => format!("@{}", global_var_id),
+            IRObj::FuncSym(block_id) => format!("{}", block_id),
+            IRObj::ZeroInit => "zeroinit".to_string(),
+            IRObj::Args(args) => args
+                .iter()
+                .map(|arg| arg.to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+            IRObj::Param {
+                param_type: _,
+                idx: _,
+                ident,
+            } => format!("#{ident}"),
+            IRObj::None => "".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct InstData {
     pub typ: BType,
     pub ir_obj: IRObj,
     pub opcode: KoopaOpCode,
-    pub operands: Vec<Operand>,
+    pub operands: Vec<IRObj>,
     pub users: Vec<InstId>, // instructions use this instruction's result
     pub reg_used: Option<RVRegCode>, // reg used by this instruction(excluding the source regs)
 }
 
 impl InstData {
-    // id is either pointer_id or inst_id
-    pub fn new(typ: BType, ir_obj: IRObj, opcode: KoopaOpCode, operands: Vec<Operand>) -> Self {
+    // id is either sc_var_id or inst_id
+    pub fn new(typ: BType, ir_obj: IRObj, opcode: KoopaOpCode, operands: Vec<IRObj>) -> Self {
         Self {
             typ,
             ir_obj,
@@ -442,14 +528,24 @@ impl InstData {
 
 impl std::fmt::Display for InstData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let operands_str = self
-            .operands
-            .iter()
-            .map(|op| op.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
+        if matches!(self.opcode, KoopaOpCode::CALL) {
+            write!(
+                f,
+                "{} @{}({})",
+                self.opcode,
+                self.operands.first().unwrap().to_string(),
+                self.operands[1].to_string()
+            )
+        } else {
+            let operands_str = self
+                .operands
+                .iter()
+                .map(|op| op.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
 
-        write!(f, "{} {}", self.opcode, operands_str)
+            write!(f, "{} {}", self.opcode, operands_str)
+        }
     }
 }
 
@@ -464,8 +560,8 @@ pub fn insert_ir(inst_data: InstData) -> InstId {
 
     // add this inst as a user to all its operand instructions
     for operand in &inst_data.operands {
-        if let Operand::InstId(op_id) = operand {
-            dfg_mut.add_user(op_id, inst_id);
+        if let IRObj::IRVar((_, ir_var_inst_id)) = operand {
+            dfg_mut.add_user(ir_var_inst_id, inst_id);
         }
     }
 
