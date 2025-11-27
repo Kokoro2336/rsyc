@@ -19,8 +19,12 @@ pub struct StackFrame {
     saved_map: HashMap<String, u32>, // name: offset
     // saved reg offset
     saved_reg_offset: u32,
+    // origin reg offset
+    origin_reg_offset: u32,
     // ra_offset
     ra_offset: Option<u32>,
+    // fp_offset
+    fp_offset: Option<u32>,
     // offset relative to the top of l_val area.
     cur_l_val_offset: u32,
     // offset relative to the top of param area,
@@ -35,9 +39,7 @@ impl StackFrame {
     }
 
     pub fn reset_saved_regs_area(&mut self) {
-        self.saved_reg_offset = self.size
-            - self.ra_offset.unwrap_or(0)
-            - self.saved_map.len() as u32 * (RISCV_BITS / 8);
+        self.saved_reg_offset = self.origin_reg_offset;
         self.saved_map.clear();
     }
 }
@@ -57,6 +59,7 @@ impl StackFrameManager {
         // each inst is only assigned once, so we can simply sum up the size of all as long as the inst have return value.
         let dfg = func.dfg.borrow();
         let mut ra_size = 0;
+        let mut fp_size = 0;
         let mut saved_reg_size = 0;
         let mut params_size = 0;
 
@@ -64,6 +67,7 @@ impl StackFrameManager {
             if matches!(inst.opcode, KoopaOpCode::CALL) {
                 // ra_size, reserve space for ra
                 ra_size = 4;
+                fp_size = 4;
 
                 //TODO: saved_reg_size.
                 // we need to know which caller-saved registers are used in this function when CALL executed,
@@ -76,7 +80,8 @@ impl StackFrameManager {
                         let total_size: u32 = args.iter().enumerate().fold(0, |acc, (idx, arg)| {
                             acc + if idx > (REG_PARAMS_MAX_NUM - 1) as usize {
                                 match *arg {
-                                    IRObj::IRVar((_, inst_id)) => ASM_CONTEXT.with(|ctx| {
+                                    IRObj::IRVar((_, inst_id))
+                                    | IRObj::ReturnVal { inst_id, .. } => ASM_CONTEXT.with(|ctx| {
                                         ctx.borrow()
                                             .get_current_dfg()
                                             .borrow()
@@ -86,7 +91,7 @@ impl StackFrameManager {
                                             .size_in_bytes()
                                     }),
 
-                                    IRObj::ScVar { .. } => 4,
+                                    IRObj::ScVar { .. } | IRObj::Const(_) => 4,
                                     _ => 0,
                                 }
                             } else {
@@ -106,20 +111,30 @@ impl StackFrameManager {
 
         // actually manager doesn't know the initial value of sp and fp,
         // so we use positive offset to represent them for convenience.
-        let size =
-            ((ra_size + saved_reg_size + params_size + local_val_size + (STK_FRM_BASE_LENGTH - 1))
-                / STK_FRM_BASE_LENGTH)
-                * STK_FRM_BASE_LENGTH;
+        let size = ((ra_size
+            + fp_size
+            + saved_reg_size
+            + params_size
+            + local_val_size
+            + (STK_FRM_BASE_LENGTH - 1))
+            / STK_FRM_BASE_LENGTH)
+            * STK_FRM_BASE_LENGTH;
 
         self.frame = Some(StackFrame {
             size,
 
             saved_map: HashMap::new(),
             saved_reg_offset: params_size + local_val_size,
+            origin_reg_offset: params_size + local_val_size,
 
             ra_offset: match ra_size {
                 0 => None,
                 _ => Some(size - ra_size),
+            },
+
+            fp_offset: match fp_size {
+                0 => None,
+                _ => Some(size - ra_size - fp_size),
             },
 
             cur_l_val_offset: params_size,
@@ -195,7 +210,7 @@ impl StackFrameManager {
 
     pub fn get_origin_param_wrapped(&self, idx: u32) -> RVOperandType {
         let offset = ASM_CONTEXT.with(|ctx| {
-            ctx.borrow().get_current_func().params[0..(idx as usize)]
+            ctx.borrow().get_current_func().params[REG_PARAMS_MAX_NUM as usize..(idx as usize)]
                 .iter()
                 .fold(0, |acc, param| acc + param.param_type.size_in_bytes())
         });
@@ -233,20 +248,28 @@ impl StackFrameManager {
         }
     }
 
-    pub fn has_callee(&self) -> bool {
-        self.frame
-            .as_ref()
-            .expect("No active stack frame!")
-            .ra_offset
-            .is_some()
-    }
-
     pub fn get_ra_offset(&self) -> u32 {
         self.frame
             .as_ref()
             .expect("No active stack frame!")
             .ra_offset
             .expect("No return address reserved in current stack frame!")
+    }
+
+    pub fn get_fp_offset(&self) -> u32 {
+        self.frame
+            .as_ref()
+            .expect("No active stack frame!")
+            .fp_offset
+            .expect("No frame pointer reserved in current stack frame!")
+    }
+
+    pub fn has_callee(&self) -> bool {
+        self.frame
+            .as_ref()
+            .expect("No active stack frame!")
+            .ra_offset
+            .is_some()
     }
 }
 

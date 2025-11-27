@@ -1,10 +1,11 @@
 use crate::global::config::BType;
-use crate::global::context::SC_CONTEXT_STACK;
+use crate::global::context::{RETURN_TYPES, SC_CONTEXT_STACK};
 use crate::ir::config::{KoopaOpCode, PTR_ID_ALLOCATOR};
 use crate::ir::koopa::{insert_ir, BasicBlock, BasicBlockType, Func, IRObj, InstData, Program};
 use crate::sc::decl::Decl;
 use crate::sc::stmt::{Statement, Stmt};
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 #[derive(Debug, Clone)]
@@ -24,7 +25,6 @@ impl CompUnit {
     pub fn parse(&self) -> Program {
         // construct Program and return
         let mut program = Program::new();
-        let mut has_main = false;
 
         // init all global defs in global table first for later searching
         self.global_decls
@@ -60,16 +60,27 @@ impl CompUnit {
                 acc
             });
 
-        for func in &self.func_defs {
-            if func.ident == "main" && matches!(func.func_type, BType::Int) {
-                has_main = true;
-            }
-            program.push_func(func.parse());
+        self.func_defs.iter().for_each(|func_def| {
+            RETURN_TYPES.with(|ret_types| {
+                ret_types.borrow_mut().enter_func();
+            });
+            func_def.find_return_val();
+            *func_def.return_val.borrow_mut() =
+                Some(RETURN_TYPES.with(|ret_types| ret_types.borrow_mut().analyze_return_type()));
+        });
+
+        println!("{:#?}", &self.func_defs.iter().map(|f| (&f.ident, f.return_val.borrow().clone())).collect::<Vec<(&String, Option<ReturnVal>)>>());
+
+        if !self
+            .func_defs
+            .iter()
+            .any(|f| f.ident == "main" && matches!(f.func_type, BType::Int))
+        {
+            panic!("No main function with return type int found.");
         }
 
-        // semantic check: must have main function
-        if !has_main {
-            panic!("No main function with return type int found.");
+        for func in &self.func_defs {
+            program.push_func(func.parse());
         }
 
         program
@@ -93,11 +104,20 @@ impl CompUnit {
 }
 
 #[derive(Debug, Clone)]
+pub enum ReturnVal {
+    AlwaysZero,
+    AlwaysNonZero,
+    Other,
+}
+
+#[derive(Debug, Clone)]
 pub struct FuncDef {
     pub func_type: BType,
     pub ident: String,
     pub params: Vec<FuncFParam>,
     pub block: Block,
+    // whether the function always has a non-zero return statement
+    pub return_val: RefCell<Option<ReturnVal>>,
 }
 
 impl FuncDef {
@@ -126,6 +146,10 @@ impl FuncDef {
         });
 
         func
+    }
+
+    fn find_return_val(&self) {
+        self.block.find_return_val();
     }
 
     fn init_func_param(&self) {
@@ -217,6 +241,12 @@ impl Block {
             }
         };
     }
+
+    pub fn find_return_val(&self) {
+        for item in &self.block_items {
+            item.find_return_val();
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -234,6 +264,12 @@ impl BlockItem {
             BlockItem::Stmt { stmt } => {
                 stmt.parse();
             }
+        }
+    }
+
+    pub fn find_return_val(&self) {
+        if let BlockItem::Stmt { stmt } = self {
+            stmt.find_return_val();
         }
     }
 }

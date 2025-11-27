@@ -3,7 +3,7 @@ use crate::asm::reg::RVREG_ALLOCATOR;
 use crate::global::config::BType;
 use crate::global::context::SC_CONTEXT_STACK;
 use crate::ir::config::{KoopaOpCode, BLOCK_ID_ALLOCATOR, SYSY_STD_LIB};
-use crate::sc::ast::FuncFParam;
+use crate::sc::ast::{FuncFParam, ReturnVal};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -380,19 +380,20 @@ impl std::fmt::Display for BasicBlock {
                     }
                     continue;
                 }
-                _ => {
-                    if let IRObj::IRVar((ir_var_id, _)) = inst_data.ir_obj {
-                        writeln!(f, "  %{} = {}", ir_var_id, inst_data)?;
-                    } else if let IRObj::ScVar {
+                _ => match inst_data.ir_obj {
+                    IRObj::IRVar((ir_var_id, _)) | IRObj::ReturnVal { ir_var_id, .. } => {
+                        writeln!(f, "  %{ir_var_id} = {inst_data}")?;
+                    }
+                    IRObj::ScVar {
                         initialized: _,
                         sc_var_id,
-                    } = inst_data.ir_obj
-                    {
-                        writeln!(f, "  @{} = {}", sc_var_id, inst_data)?;
-                    } else {
-                        writeln!(f, "  {}", inst_data)?;
+                    } => {
+                        writeln!(f, "  @{sc_var_id} = {inst_data}")?;
                     }
-                }
+                    _ => {
+                        writeln!(f, "  {inst_data}")?;
+                    }
+                },
             }
         }
 
@@ -417,6 +418,11 @@ pub enum IRObj {
         initialized: bool,
         global_var_id: String,
         init_val: i32,
+    },
+    ReturnVal {
+        ir_var_id: IRVarId,
+        inst_id: InstId,
+        return_val: ReturnVal,
     },
 
     // special operands
@@ -468,6 +474,11 @@ impl ToString for IRObj {
                 init_val: _,
             } => format!("@{}", global_var_id),
             IRObj::FuncSym(block_id) => format!("{}", block_id),
+            IRObj::ReturnVal {
+                ir_var_id,
+                inst_id: _,
+                return_val: _,
+            } => format!("%{}", ir_var_id),
             IRObj::ZeroInit => "zeroinit".to_string(),
             IRObj::Args(args) => args
                 .iter()

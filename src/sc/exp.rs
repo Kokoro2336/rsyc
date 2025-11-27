@@ -2,12 +2,13 @@ use crate::global::config::BType;
 use crate::global::context::SC_CONTEXT_STACK;
 use crate::ir::config::{KoopaOpCode, IR_VAR_ID_ALLOCATOR};
 use crate::ir::koopa::{insert_ir, IRObj, InstData};
-use crate::sc::ast::LVal;
+use crate::sc::ast::{LVal, ReturnVal};
 use crate::sc::op::*;
 
 pub trait Expression {
     fn parse_var_exp(&self) -> IRObj;
     fn parse_const_exp(&self) -> IRObj;
+    fn pre_parse(&self) -> IRObj;
 }
 
 #[derive(Debug, Clone)]
@@ -26,6 +27,12 @@ impl Expression for Exp {
     fn parse_const_exp(&self) -> IRObj {
         match self {
             Exp::LOrExp { lor_exp } => return lor_exp.parse_const_exp(),
+        }
+    }
+
+    fn pre_parse(&self) -> IRObj {
+        match self {
+            Exp::LOrExp { lor_exp } => return lor_exp.pre_parse(),
         }
     }
 }
@@ -54,27 +61,98 @@ impl Expression for LOrExp {
             } => {
                 let left = lor_exp.parse_var_exp();
                 // perform short-circuit evaluation for logical OR
-                if let IRObj::Const(v) = &left {
-                    if *v != 0 {
+                match &left {
+                    IRObj::Const(v) if *v != 0 => {
+                        println!(
+                            "Short-circuiting logical OR: left operand is non-zero constant: {v}"
+                        );
                         return IRObj::Const(1);
                     }
-                } else if matches!(left, IRObj::None) {
-                    panic!("Cannot use void type as an operand")
+                    IRObj::ReturnVal {
+                        return_val,
+                        ir_var_id,
+                        ..
+                    } if matches!(*return_val, ReturnVal::AlwaysNonZero) => {
+                        println!("Short-circuiting logical OR: left operand is always non-zero return value: {:#?}, ir_var_id: {:?}", return_val, ir_var_id);
+                        return IRObj::Const(1);
+                    }
+                    IRObj::None => panic!("Cannot use void type as an operand"),
+                    _ => {}
                 }
 
                 let right = land_exp.parse_var_exp();
-                if let IRObj::Const(v) = &right {
-                    if *v != 0 {
-                        return IRObj::Const(1);
+                match &right {
+                    IRObj::Const(v) if *v != 0 => return IRObj::Const(1),
+                    IRObj::ReturnVal { return_val, .. }
+                        if matches!(*return_val, ReturnVal::AlwaysNonZero) =>
+                    {
+                        return IRObj::Const(1)
                     }
-                } else if matches!(right, IRObj::None) {
-                    panic!("Cannot use void type as an operand")
+                    IRObj::None => panic!("Cannot use void type as an operand"),
+                    _ => {}
                 }
 
                 // constant folding
-                if let (IRObj::Const(left_val), IRObj::Const(right_val)) = (left.clone(), right.clone()) {
-                    return IRObj::Const((left_val != 0 || right_val != 0).into());
+                match (left.clone(), right.clone()) {
+                    (IRObj::Const(left_val), IRObj::Const(right_val)) => {
+                        return IRObj::Const((left_val != 0 || right_val != 0).into());
+                    }
+                    (
+                        IRObj::ReturnVal {
+                            return_val: left_return_val,
+                            ..
+                        },
+                        IRObj::ReturnVal {
+                            return_val: right_return_val,
+                            ..
+                        },
+                    ) => {
+                        return IRObj::Const(
+                            (matches!(left_return_val, ReturnVal::AlwaysNonZero)
+                                || matches!(right_return_val, ReturnVal::AlwaysNonZero))
+                            .into(),
+                        );
+                    }
+                    _ => {}
                 }
+
+                let converted_left = match &left {
+                    IRObj::ReturnVal { .. } | IRObj::IRVar(_) => {
+                        let ir_obj = IRObj::IRVar((
+                            IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
+                            SC_CONTEXT_STACK.with(|stack| {
+                                stack.borrow().get_current_dfg().borrow().get_next_inst_id()
+                            }),
+                        ));
+                        insert_ir(InstData::new(
+                            BType::Int,
+                            ir_obj.clone(),
+                            KoopaOpCode::NE,
+                            vec![left.clone(), IRObj::Const(0)],
+                        ));
+                        ir_obj
+                    }
+                    _ => left,
+                };
+
+                let converted_right = match &right {
+                    IRObj::ReturnVal { .. } | IRObj::IRVar(_) => {
+                        let ir_obj = IRObj::IRVar((
+                            IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
+                            SC_CONTEXT_STACK.with(|stack| {
+                                stack.borrow().get_current_dfg().borrow().get_next_inst_id()
+                            }),
+                        ));
+                        insert_ir(InstData::new(
+                            BType::Int,
+                            ir_obj.clone(),
+                            KoopaOpCode::NE,
+                            vec![right.clone(), IRObj::Const(0)],
+                        ));
+                        ir_obj
+                    }
+                    _ => right,
+                };
 
                 let koopa_op = match lor_op {
                     LOrOp::Or => KoopaOpCode::OR,
@@ -89,7 +167,7 @@ impl Expression for LOrExp {
                     BType::Int,
                     ir_obj.clone(),
                     koopa_op,
-                    vec![left, right],
+                    vec![converted_left, converted_right],
                 ));
                 ir_obj
             }
@@ -130,6 +208,44 @@ impl Expression for LOrExp {
             }
         }
     }
+
+    fn pre_parse(&self) -> IRObj {
+        match self {
+            LOrExp::LAndExp { land_exp } => land_exp.pre_parse(),
+
+            LOrExp::LOrExp {
+                lor_exp,
+                lor_op: _,
+                land_exp,
+            } => {
+                let left = lor_exp.pre_parse();
+                // perform short-circuit evaluation for logical OR
+                match &left {
+                    IRObj::Const(v) if *v != 0 => return IRObj::Const(1),
+                    _ => {}
+                }
+
+                let right = land_exp.pre_parse();
+                match &right {
+                    IRObj::Const(v) if *v != 0 => return IRObj::Const(1),
+                    _ => {}
+                }
+
+                // constant folding
+                if let (IRObj::Const(left_val), IRObj::Const(right_val)) =
+                    (left.clone(), right.clone())
+                {
+                    return IRObj::Const(if left_val != 0 || right_val != 0 {
+                        1
+                    } else {
+                        0
+                    });
+                }
+
+                IRObj::IRVar((0, 0))
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -154,31 +270,100 @@ impl Expression for LAndExp {
                 eq_exp,
             } => {
                 let left = land_exp.parse_var_exp();
-                if matches!(left, IRObj::None) {
-                    panic!("Cannot use void type as an operand")
-                }
-                if let IRObj::Const(v) = &left {
-                    if *v == 0 {
+                match &left {
+                    IRObj::None => panic!("Cannot use void type as an operand"),
+                    IRObj::Const(v) if *v == 0 => {
+                        println!(
+                            "Short-circuiting logical AND: left operand is zero constant: {v}"
+                        );
                         return IRObj::Const(0);
                     }
+                    IRObj::ReturnVal {
+                        return_val,
+                        ir_var_id,
+                        ..
+                    } if matches!(*return_val, ReturnVal::AlwaysZero) => {
+                        println!("Short-circuiting logical AND: left operand is always zero return value: {:#?}, ir_var_id: {:?}", return_val, ir_var_id);
+                        return IRObj::Const(0);
+                    }
+                    _ => {}
                 }
 
                 let right = eq_exp.parse_var_exp();
-                if matches!(right, IRObj::None) {
-                    panic!("Cannot use void type as an operand")
-                }
-                if let IRObj::Const(v) = &right {
-                    if *v == 0 {
-                        return IRObj::Const(0);
+                match &right {
+                    IRObj::None => panic!("Cannot use void type as an operand"),
+                    IRObj::Const(v) if *v == 0 => return IRObj::Const(0),
+                    IRObj::ReturnVal { return_val, .. }
+                        if matches!(*return_val, ReturnVal::AlwaysZero) =>
+                    {
+                        return IRObj::Const(0)
                     }
+                    _ => {}
                 }
 
-                if let (IRObj::Const(left_val), IRObj::Const(right_val)) = (left.clone(), right.clone()) {
-                    return IRObj::Const((left_val != 0 && right_val != 0).into());
+                match (left.clone(), right.clone()) {
+                    (IRObj::Const(left_val), IRObj::Const(right_val)) => {
+                        return IRObj::Const((left_val != 0 && right_val != 0).into());
+                    }
+                    (
+                        IRObj::ReturnVal {
+                            return_val: left_return_val,
+                            ..
+                        },
+                        IRObj::ReturnVal {
+                            return_val: right_return_val,
+                            ..
+                        },
+                    ) => {
+                        return IRObj::Const(
+                            (matches!(left_return_val, ReturnVal::AlwaysNonZero)
+                                && matches!(right_return_val, ReturnVal::AlwaysNonZero))
+                            .into(),
+                        );
+                    }
+                    _ => {}
                 }
 
                 let koopa_op = match land_op {
                     LAndOp::And => KoopaOpCode::AND,
+                };
+
+                let converted_left = match &left {
+                    IRObj::ReturnVal { .. } | IRObj::IRVar(_) => {
+                        let ir_obj = IRObj::IRVar((
+                            IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
+                            SC_CONTEXT_STACK.with(|stack| {
+                                stack.borrow().get_current_dfg().borrow().get_next_inst_id()
+                            }),
+                        ));
+                        insert_ir(InstData::new(
+                            BType::Int,
+                            ir_obj.clone(),
+                            KoopaOpCode::NE,
+                            vec![left.clone(), IRObj::Const(0)],
+                        ));
+                        ir_obj
+                    }
+                    _ => left,
+                };
+
+                let converted_right = match &right {
+                    IRObj::ReturnVal { .. } | IRObj::IRVar(_) => {
+                        let ir_obj = IRObj::IRVar((
+                            IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
+                            SC_CONTEXT_STACK.with(|stack| {
+                                stack.borrow().get_current_dfg().borrow().get_next_inst_id()
+                            }),
+                        ));
+                        insert_ir(InstData::new(
+                            BType::Int,
+                            ir_obj.clone(),
+                            KoopaOpCode::NE,
+                            vec![right.clone(), IRObj::Const(0)],
+                        ));
+                        ir_obj
+                    }
+                    _ => right,
                 };
 
                 let ir_obj = IRObj::IRVar((
@@ -190,7 +375,7 @@ impl Expression for LAndExp {
                     BType::Int,
                     ir_obj.clone(),
                     koopa_op,
-                    vec![left, right],
+                    vec![converted_left, converted_right],
                 ));
                 ir_obj
             }
@@ -218,6 +403,37 @@ impl Expression for LAndExp {
                         left, right
                     ),
                 }
+            }
+        }
+    }
+
+    fn pre_parse(&self) -> IRObj {
+        match self {
+            LAndExp::EqExp { eq_exp } => eq_exp.pre_parse(),
+            LAndExp::LAndExp {
+                land_exp,
+                land_op: _,
+                eq_exp,
+            } => {
+                let left = land_exp.pre_parse();
+                // short-circuit for logical AND
+                match &left {
+                    IRObj::Const(v) if *v == 0 => return IRObj::Const(0),
+                    _ => {}
+                }
+
+                let right = eq_exp.pre_parse();
+                match &right {
+                    IRObj::Const(v) if *v == 0 => return IRObj::Const(0),
+                    _ => {}
+                }
+
+                // constant folding
+                if let (IRObj::Const(l), IRObj::Const(r)) = (left.clone(), right.clone()) {
+                    return IRObj::Const(if l != 0 && r != 0 { 1 } else { 0 });
+                }
+
+                IRObj::IRVar((0, 0))
             }
         }
     }
@@ -253,7 +469,9 @@ impl Expression for EqExp {
                     panic!("Cannot use void type as an operand")
                 }
 
-                if let (IRObj::Const(left_val), IRObj::Const(right_val)) = (left.clone(), right.clone()) {
+                if let (IRObj::Const(left_val), IRObj::Const(right_val)) =
+                    (left.clone(), right.clone())
+                {
                     let res = match eq_op {
                         EqOp::Eq => left_val == right_val,
                         EqOp::Ne => left_val != right_val,
@@ -310,6 +528,31 @@ impl Expression for EqExp {
             }
         }
     }
+
+    fn pre_parse(&self) -> IRObj {
+        match self {
+            EqExp::RelExp { rel_exp } => rel_exp.pre_parse(),
+            EqExp::EqExp {
+                eq_exp,
+                eq_op,
+                rel_exp,
+            } => {
+                let left = eq_exp.pre_parse();
+                let right = rel_exp.pre_parse();
+
+                match (&left, &right) {
+                    (IRObj::Const(l), IRObj::Const(r)) => {
+                        let res = match eq_op {
+                            EqOp::Eq => l == r,
+                            EqOp::Ne => l != r,
+                        };
+                        IRObj::Const(if res { 1 } else { 0 })
+                    }
+                    _ => IRObj::IRVar((0, 0)),
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -342,7 +585,9 @@ impl Expression for RelExp {
                     panic!("Cannot use void type as an operand")
                 }
 
-                if let (IRObj::Const(left_val), IRObj::Const(right_val)) = (left.clone(), right.clone()) {
+                if let (IRObj::Const(left_val), IRObj::Const(right_val)) =
+                    (left.clone(), right.clone())
+                {
                     let res = match rel_op {
                         RelOp::Lt => left_val < right_val,
                         RelOp::Gt => left_val > right_val,
@@ -405,6 +650,33 @@ impl Expression for RelExp {
             }
         }
     }
+
+    fn pre_parse(&self) -> IRObj {
+        match self {
+            RelExp::AddExp { add_exp } => add_exp.pre_parse(),
+            RelExp::RelExp {
+                rel_exp,
+                rel_op,
+                add_exp,
+            } => {
+                let left = rel_exp.pre_parse();
+                let right = add_exp.pre_parse();
+
+                match (&left, &right) {
+                    (IRObj::Const(l), IRObj::Const(r)) => {
+                        let res = match rel_op {
+                            RelOp::Lt => l < r,
+                            RelOp::Gt => l > r,
+                            RelOp::Le => l <= r,
+                            RelOp::Ge => l >= r,
+                        };
+                        IRObj::Const(if res { 1 } else { 0 })
+                    }
+                    _ => IRObj::IRVar((0, 0)),
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -455,12 +727,22 @@ impl Expression for UnaryExp {
 
                 let ir_obj = match func_type {
                     BType::Void => IRObj::None,
-                    _ => IRObj::IRVar((
-                        IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                        SC_CONTEXT_STACK.with(|stack| {
+                    _ => IRObj::ReturnVal {
+                        ir_var_id: IR_VAR_ID_ALLOCATOR
+                            .with(|allocator| allocator.borrow_mut().alloc()),
+                        inst_id: SC_CONTEXT_STACK.with(|stack| {
                             stack.borrow().get_current_dfg().borrow().get_next_inst_id()
                         }),
-                    )),
+                        return_val: SC_CONTEXT_STACK.with(|stack| {
+                            stack
+                                .borrow()
+                                .get_func_def(ident.clone())
+                                .return_val
+                                .borrow()
+                                .clone()
+                                .unwrap()
+                        }),
+                    },
                 };
 
                 insert_ir(InstData::new(
@@ -546,6 +828,28 @@ impl Expression for UnaryExp {
             }
         }
     }
+
+    fn pre_parse(&self) -> IRObj {
+        match self {
+            UnaryExp::PrimaryExp { exp } => exp.pre_parse(),
+            // TODO: this one isn't very accurate
+            UnaryExp::FunctionCall { ident: _, args: _ } => IRObj::IRVar((0, 0)),
+            UnaryExp::UnaryExp {
+                unary_op,
+                unary_exp,
+            } => {
+                let inner = unary_exp.pre_parse();
+                match inner {
+                    IRObj::Const(v) => match unary_op {
+                        UnaryOp::Plus => IRObj::Const(v),
+                        UnaryOp::Minus => IRObj::Const(-v),
+                        UnaryOp::Not => IRObj::Const(if v == 0 { 1 } else { 0 }),
+                    },
+                    _ => IRObj::IRVar((0, 0)),
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -578,7 +882,9 @@ impl Expression for MulExp {
                     panic!("Cannot use void type as an operand")
                 }
 
-                if let (IRObj::Const(left_val), IRObj::Const(right_val)) = (left.clone(), right.clone()) {
+                if let (IRObj::Const(left_val), IRObj::Const(right_val)) =
+                    (left.clone(), right.clone())
+                {
                     let res = match mul_op {
                         MulOp::Mul => left_val * right_val,
                         MulOp::Div => left_val / right_val,
@@ -638,6 +944,31 @@ impl Expression for MulExp {
             }
         }
     }
+
+    fn pre_parse(&self) -> IRObj {
+        match self {
+            MulExp::UnaryExp { unary_exp } => unary_exp.pre_parse(),
+            MulExp::MulExp {
+                mul_exp,
+                mul_op,
+                unary_exp,
+            } => {
+                let left = mul_exp.pre_parse();
+                let right = unary_exp.pre_parse();
+                match (&left, &right) {
+                    (IRObj::Const(l), IRObj::Const(r)) => {
+                        let res = match mul_op {
+                            MulOp::Mul => l * r,
+                            MulOp::Div => l / r,
+                            MulOp::Mod => l % r,
+                        };
+                        IRObj::Const(res)
+                    }
+                    _ => IRObj::IRVar((0, 0)),
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -672,7 +1003,9 @@ impl Expression for AddExp {
                     panic!("Cannot use void type as an operand")
                 }
 
-                if let (IRObj::Const(left_val), IRObj::Const(right_val)) = (left.clone(), right.clone()) {
+                if let (IRObj::Const(left_val), IRObj::Const(right_val)) =
+                    (left.clone(), right.clone())
+                {
                     let res = match add_op {
                         AddOp::Add => left_val + right_val,
                         AddOp::Sub => left_val - right_val,
@@ -725,6 +1058,30 @@ impl Expression for AddExp {
                         "Non-constant in const expression: left={:?}, right={:?}",
                         left, right
                     ),
+                }
+            }
+        }
+    }
+
+    fn pre_parse(&self) -> IRObj {
+        match self {
+            AddExp::MulExp { mul_exp } => mul_exp.pre_parse(),
+            AddExp::AddExp {
+                add_exp,
+                add_op,
+                mul_exp,
+            } => {
+                let left = add_exp.pre_parse();
+                let right = mul_exp.pre_parse();
+                match (&left, &right) {
+                    (IRObj::Const(l), IRObj::Const(r)) => {
+                        let res = match add_op {
+                            AddOp::Add => l + r,
+                            AddOp::Sub => l - r,
+                        };
+                        IRObj::Const(res)
+                    }
+                    _ => IRObj::IRVar((0, 0)),
                 }
             }
         }
@@ -825,6 +1182,22 @@ impl Expression for PrimaryExp {
                     value
                 } else {
                     panic!("LVal {l_val} not found in const table, maybe the ident is for a variable or not defined");
+                }
+            }
+        }
+    }
+
+    fn pre_parse(&self) -> IRObj {
+        match self {
+            PrimaryExp::Number { value } => IRObj::Const(*value),
+            PrimaryExp::Exp { exp } => exp.pre_parse(),
+            PrimaryExp::LVal { l_val } => {
+                if let Some(value) =
+                    SC_CONTEXT_STACK.with(|stack| stack.borrow().get_latest_const(&l_val.ident))
+                {
+                    value
+                } else {
+                    IRObj::IRVar((0, 0))
                 }
             }
         }

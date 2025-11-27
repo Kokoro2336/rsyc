@@ -207,15 +207,16 @@ impl Declaration for VarDef {
         if let Some(init_val) = &self.init_val {
             let parse_result = init_val.parse();
             // we don't need to store temp var to var_table here for it'll be removed soon after STORE
-            if let IRObj::Const(_) | IRObj::IRVar(_) = parse_result {
+            if let IRObj::Const(_) | IRObj::IRVar(_) | IRObj::ReturnVal { .. } = parse_result {
                 insert_ir(InstData::new(
                     BType::Void,
                     IRObj::None,
                     KoopaOpCode::STORE,
                     vec![
                         match parse_result {
-                            IRObj::IRVar(id) => IRObj::IRVar(id),
-                            IRObj::Const(c) => IRObj::Const(c),
+                            IRObj::IRVar(_) | IRObj::Const(_) | IRObj::ReturnVal { .. } => {
+                                parse_result
+                            }
                             _ => unreachable!(),
                         },
                         // the allocated address

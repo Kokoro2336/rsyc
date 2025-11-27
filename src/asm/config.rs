@@ -111,6 +111,14 @@ pub enum RVRegCode {
     T6 = 31, // temporaries
 }
 
+impl RVRegCode {
+    pub fn is_temp(&self) -> bool {
+        (*self as u8 >= RVRegCode::T0 as u8 && *self as u8 <= RVRegCode::T2 as u8)
+            || (*self as u8 >= RVRegCode::T3 as u8 && *self as u8 <= RVRegCode::T6 as u8)
+            || (*self as u8 >= RVRegCode::A0 as u8 && *self as u8 <= RVRegCode::A7 as u8)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum RVOperandType {
     Temp(RVRegCode), // reg temporarily allocated, often for asms transformed from the same IR.
@@ -156,8 +164,16 @@ impl RVOperandType {
 
     /// this function would only free temporary registers.
     pub fn free_temp(&self) {
-        if let RVOperandType::Temp(reg) = self {
-            RVREG_ALLOCATOR.with(|allocator| allocator.borrow_mut().free_reg(*reg));
+        match self {
+            RVOperandType::Temp(reg) => {
+                RVREG_ALLOCATOR.with(|allocator| allocator.borrow_mut().free_reg(*reg));
+            }
+            RVOperandType::MemWithReg { offset: _, reg } => {
+                if reg.is_temp() {
+                    RVREG_ALLOCATOR.with(|allocator| allocator.borrow_mut().free_reg(*reg));
+                }
+            }
+            _ => {}
         }
     }
 }

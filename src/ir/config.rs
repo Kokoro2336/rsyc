@@ -1,5 +1,5 @@
 use crate::global::config::BType;
-use crate::sc::ast::{Block, FuncDef, FuncFParam};
+use crate::sc::ast::{Block, FuncDef, FuncFParam, ReturnVal};
 use std::cell::RefCell;
 use std::vec::Vec;
 
@@ -97,12 +97,14 @@ thread_local! {
             ident: "getint".to_string(),
             params: vec![],
             block: Block { block_items: vec![] },
+            return_val: RefCell::new(Some(ReturnVal::Other)),
         },
         FuncDef {
             func_type: BType::Int,
             ident: "getch".to_string(),
             params: vec![],
             block: Block { block_items: vec![] },
+            return_val: RefCell::new(Some(ReturnVal::Other)),
         },
         FuncDef {
             func_type: BType::Int,
@@ -112,6 +114,7 @@ thread_local! {
                 ident: "".to_string(),
             }],
             block: Block { block_items: vec![] },
+            return_val: RefCell::new(Some(ReturnVal::Other)),
         },
         FuncDef {
             func_type: BType::Void,
@@ -121,6 +124,7 @@ thread_local! {
                 ident: "".to_string(),
             }],
             block: Block { block_items: vec![] },
+            return_val: RefCell::new(Some(ReturnVal::Other)),
         },
         FuncDef {
             func_type: BType::Void,
@@ -130,6 +134,7 @@ thread_local! {
                 ident: "".to_string(),
             }],
             block: Block { block_items: vec![] },
+            return_val: RefCell::new(Some(ReturnVal::Other)),
         },
         FuncDef {
             func_type: BType::Void,
@@ -145,18 +150,21 @@ thread_local! {
                 },
             ],
             block: Block { block_items: vec![] },
+            return_val: RefCell::new(Some(ReturnVal::Other)),
         },
         FuncDef {
             func_type: BType::Void,
             ident: "starttime".to_string(),
             params: vec![],
             block: Block { block_items: vec![] },
+            return_val: RefCell::new(Some(ReturnVal::Other)),
         },
         FuncDef {
             func_type: BType::Void,
             ident: "stoptime".to_string(),
             params: vec![],
             block: Block { block_items: vec![] },
+            return_val: RefCell::new(Some(ReturnVal::Other)),
         },
     ];
 }

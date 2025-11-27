@@ -1,7 +1,7 @@
 use crate::ir::config::SYSY_STD_LIB;
 use crate::ir::koopa::IRObj;
 use crate::ir::koopa::{BasicBlock, BlockId, DataFlowGraph, Func, InstId};
-use crate::sc::ast::{CompUnit, FuncDef, FuncFParam};
+use crate::sc::ast::{CompUnit, FuncDef, FuncFParam, ReturnVal};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -104,7 +104,8 @@ impl ScContextStack {
     pub fn insert_global_sym(&mut self, name: String, value: IRObj) {
         let global_sym = self.global_sym_table.get(&name);
         if global_sym.is_some()
-            && (matches!(global_sym.unwrap(), IRObj::FuncSym(_)) | matches!(global_sym.unwrap(), IRObj::Const(_)))
+            && (matches!(global_sym.unwrap(), IRObj::FuncSym(_))
+                | matches!(global_sym.unwrap(), IRObj::Const(_)))
         {
             panic!(
                 "Global symbol {name} already exists, and you can't update value of FuncSym or Const"
@@ -115,9 +116,7 @@ impl ScContextStack {
     }
 
     pub fn get_global_sym(&self, name: &str) -> Option<IRObj> {
-        self.global_sym_table
-            .get(name)
-            .cloned()
+        self.global_sym_table.get(name).cloned()
     }
 
     pub fn has_local_cxt(&self) -> bool {
@@ -128,10 +127,12 @@ impl ScContextStack {
         if let Some(comp_unit) = &self.comp_unit {
             if let Some(func_def) = comp_unit.func_defs.iter().find(|fd| fd.ident == func_ident) {
                 func_def.clone()
-
-            } else if let Some(func_decl) = SYSY_STD_LIB.with(|lib| lib.iter().find(|func_decl| func_decl.ident == func_ident).cloned()) {
+            } else if let Some(func_decl) = SYSY_STD_LIB.with(|lib| {
+                lib.iter()
+                    .find(|func_decl| func_decl.ident == func_ident)
+                    .cloned()
+            }) {
                 func_decl.clone()
-
             } else {
                 panic!("No function definitions found in CompUnit");
             }
@@ -376,6 +377,57 @@ impl ScContextStack {
     }
 }
 
+pub struct ReturnTypes {
+    pub return_vals: Option<Vec<IRObj>>,
+}
+
+impl ReturnTypes {
+    pub fn new() -> Self {
+        ReturnTypes { return_vals: None }
+    }
+
+    pub fn enter_func(&mut self) {
+        if self.return_vals.is_none() {
+            self.return_vals = Some(vec![]);
+        } else {
+            self.return_vals.as_mut().unwrap().clear();
+        }
+    }
+
+    pub fn add_return_val(&mut self, ret_val: IRObj) {
+        if let Some(return_vals) = &mut self.return_vals {
+            return_vals.push(ret_val);
+        } else {
+            panic!("No return_vals available to add return value");
+        }
+    }
+
+    pub fn analyze_return_type(&self) -> ReturnVal {
+        if let Some(return_vals) = &self.return_vals {
+            if return_vals.is_empty() {
+                ReturnVal::Other
+            } else if return_vals.iter().all(|val| matches!(val, IRObj::Const(0))) {
+                ReturnVal::AlwaysZero
+            } else if return_vals.iter().all(|val| match val {
+                IRObj::Const(i) => *i != 0,
+                IRObj::ReturnVal {
+                    ir_var_id: _,
+                    inst_id: _,
+                    return_val,
+                } => matches!(return_val, ReturnVal::AlwaysNonZero),
+                _ => false,
+            }) {
+                ReturnVal::AlwaysNonZero
+            } else {
+                ReturnVal::Other
+            }
+        } else {
+            ReturnVal::Other
+        }
+    }
+}
+
 thread_local! {
+    pub static RETURN_TYPES: RefCell<ReturnTypes> = RefCell::new(ReturnTypes::new());
     pub static SC_CONTEXT_STACK: RefCell<ScContextStack> = RefCell::new(ScContextStack::new());
 }

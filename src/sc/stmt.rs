@@ -1,5 +1,5 @@
 use crate::global::config::BType;
-use crate::global::context::SC_CONTEXT_STACK;
+use crate::global::context::{RETURN_TYPES, SC_CONTEXT_STACK};
 use crate::ir::config::KoopaOpCode;
 use crate::ir::koopa::{insert_ir, BasicBlock, BasicBlockType, IRObj, InstData};
 use crate::sc::ast::{Block, LVal};
@@ -9,6 +9,7 @@ use std::rc::Rc;
 
 pub trait Statement {
     fn parse(&self);
+    fn find_return_val(&self);
 }
 
 #[derive(Debug, Clone)]
@@ -25,6 +26,17 @@ impl Statement for Stmt {
             }
             Stmt::CloseStmt { close_stmt } => {
                 close_stmt.parse();
+            }
+        }
+    }
+
+    fn find_return_val(&self) {
+        match self {
+            Stmt::OpenStmt { open_stmt } => {
+                open_stmt.find_return_val();
+            }
+            Stmt::CloseStmt { close_stmt } => {
+                close_stmt.find_return_val();
             }
         }
     }
@@ -615,6 +627,25 @@ impl Statement for OpenStmt {
             }
         }
     }
+
+    fn find_return_val(&self) {
+        match self {
+            OpenStmt::SingleCond { then_stmt, .. } => {
+                then_stmt.find_return_val();
+            }
+            OpenStmt::OpenCond {
+                then_stmt,
+                else_stmt,
+                ..
+            } => {
+                then_stmt.find_return_val();
+                else_stmt.find_return_val();
+            }
+            OpenStmt::OpenWhile { body_stmt, .. } => {
+                body_stmt.find_return_val();
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -694,6 +725,28 @@ impl Statement for CloseStmt {
             }
         }
     }
+
+    fn find_return_val(&self) {
+        match self {
+            CloseStmt::SimpleStmt { simple_stmt } => {
+                simple_stmt.find_return_val();
+            }
+            CloseStmt::CloseCond {
+                condition: _,
+                then_stmt,
+                else_stmt,
+            } => {
+                then_stmt.find_return_val();
+                else_stmt.find_return_val();
+            }
+            CloseStmt::CloseWhile {
+                condition,
+                body_stmt,
+            } => {
+                body_stmt.find_return_val();
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -734,8 +787,7 @@ impl Statement for SimpleStmt {
                     KoopaOpCode::STORE,
                     vec![
                         match result {
-                            IRObj::IRVar(id) => IRObj::IRVar(id),
-                            IRObj::Const(value) => IRObj::Const(value),
+                            IRObj::IRVar(_) | IRObj::Const(_) | IRObj::ReturnVal { .. } => result,
                             _ => {
                                 unreachable!("{:#?} is unreachable in STORE", result)
                             }
@@ -758,7 +810,11 @@ impl Statement for SimpleStmt {
             }
 
             // is it necessary?
-            SimpleStmt::RawExp { .. } => {}
+            SimpleStmt::RawExp { exp } => {
+                let _ = exp.as_ref().map(|exp| {
+                    exp.parse_var_exp();
+                });
+            }
 
             SimpleStmt::Block { block } => {
                 SC_CONTEXT_STACK.with(|stack| stack.borrow_mut().enter_scope());
@@ -865,13 +921,46 @@ impl Statement for SimpleStmt {
                     match result {
                         IRObj::None => vec![],
                         _ => vec![match result {
-                            IRObj::IRVar(id) => IRObj::IRVar(id),
-                            IRObj::Const(value) => IRObj::Const(value),
+                            IRObj::IRVar(_) | IRObj::Const(_) | IRObj::ReturnVal { .. } => result,
                             _ => unreachable!("{:#?} is unreachable in return statement", result),
                         }],
                     },
                 ));
             }
+        }
+    }
+
+    fn find_return_val(&self) {
+        match self {
+            SimpleStmt::ReturnStmt { exp } => {
+                exp.as_ref().map(|exp| {
+                    let result = exp.pre_parse();
+                    match result {
+                        IRObj::IRVar(_) => {
+                            RETURN_TYPES.with(|ret_types| {
+                                ret_types.borrow_mut().add_return_val(result);
+                            });
+                        }
+                        IRObj::ReturnVal { .. } => {
+                            RETURN_TYPES.with(|ret_types| {
+                                ret_types.borrow_mut().add_return_val(result);
+                            });
+                        }
+                        IRObj::Const(value) => {
+                            RETURN_TYPES.with(|ret_types| {
+                                ret_types.borrow_mut().add_return_val(IRObj::Const(value));
+                            });
+                        }
+                        _ => {
+                            unreachable!("{:#?} is unreachable in return statement", exp)
+                        }
+                    };
+                });
+            }
+            SimpleStmt::Block { block } => {
+                block.find_return_val();
+            }
+            _ => {}
         }
     }
 }

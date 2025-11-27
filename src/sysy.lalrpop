@@ -1,5 +1,6 @@
 use crate::sc::{ast::*, decl::*, exp::*, stmt::*, op::*};
 use crate::global::config::BType;
+use std::cell::RefCell;
 
 // lalrpop 里的约定
 grammar;
@@ -38,6 +39,7 @@ FuncDef: FuncDef = {
       ident,
       params: func_fparams,
       block,
+      return_val: RefCell::new(None),
     }
   },
   // case with no parameters
@@ -47,6 +49,7 @@ FuncDef: FuncDef = {
       ident,
       params: vec![],
       block,
+      return_val: RefCell::new(None),
      }
   },
 };

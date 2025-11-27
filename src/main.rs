@@ -11,7 +11,6 @@ mod ir;
 mod util;
 use crate::asm::rv::Asm;
 use crate::asm::context::ASM_CONTEXT;
-use crate::ir::koopa::Program;
 use crate::global::context::SC_CONTEXT_STACK;
 
 // 引用 lalrpop 生成的解析器

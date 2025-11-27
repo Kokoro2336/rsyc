@@ -178,6 +178,37 @@ impl AsmBlock {
                         });
                     });
                 }
+
+                // store frame pointer(only if has callee)
+                if STK_FRM_MANAGER.with(|manager| manager.borrow().has_callee()) {
+                    ASM_CONTEXT.with(|asm_cxt| {
+                        let mut asm_cxt = asm_cxt.borrow_mut();
+                        // store old fp
+                        asm_cxt.add_asm_inst(AsmInst {
+                            opcode: RVOpCode::SW,
+                            rd: None,
+                            rs1: Some(RVOperandType::MemWithReg {
+                                reg: RVRegCode::SP,
+                                offset: STK_FRM_MANAGER.with(|manager| manager.borrow().get_fp_offset()),
+                            }),
+                            rs2: Some(RVOperandType::Temp(RVRegCode::S0)),
+                            imm: None,
+                        });
+                    });
+                }
+
+                // no matter whether has callee, set new fp
+                ASM_CONTEXT.with(|asm_cxt| {
+                    let mut asm_cxt = asm_cxt.borrow_mut();
+                    // set new fp
+                    asm_cxt.add_asm_inst(AsmInst {
+                        opcode: RVOpCode::ADDI,
+                        rd: Some(RVOperandType::Temp(RVRegCode::S0)),
+                        rs1: Some(RVOperandType::Temp(RVRegCode::SP)),
+                        rs2: None,
+                        imm: Some(STK_FRM_MANAGER.with(|manager| manager.borrow().get_size() as i32)),
+                    });
+                });
             }
 
             for inst in ASM_CONTEXT.with(|asm_cxt| {
@@ -570,17 +601,18 @@ impl AsmInst {
                     imm: None,
                 }));
 
-
                 // saved A0 to mem for now, we would return it as Perm reg later
-                ASM_CONTEXT.with(|asm_cxt| {
-                    asm_cxt.borrow_mut().add_asm_inst(AsmInst {
-                        opcode: RVOpCode::SW,
-                        rd: None,
-                        rs1: Some(STK_FRM_MANAGER.with(|manager| manager.borrow_mut().alloc_l_val_wrapped(inst_data.ir_obj.to_string(), inst_data.typ.clone()))),
-                        rs2: Some(RVOperandType::Temp(RVRegCode::A0)),
-                        imm: None,
+                if !matches!(inst_data.ir_obj, IRObj::None) {
+                    ASM_CONTEXT.with(|asm_cxt| {
+                        asm_cxt.borrow_mut().add_asm_inst(AsmInst {
+                            opcode: RVOpCode::SW,
+                            rd: None,
+                            rs1: Some(STK_FRM_MANAGER.with(|manager| manager.borrow_mut().alloc_l_val_wrapped(inst_data.ir_obj.to_string(), inst_data.typ.clone()))),
+                            rs2: Some(RVOperandType::Temp(RVRegCode::A0)),
+                            imm: None,
+                        });
                     });
-                });
+                }
 
                 // free params reg and mem
                 params.iter().for_each(|reg| reg.free_temp());
@@ -610,6 +642,23 @@ impl AsmInst {
                 let op_reg = if let Some(res) = operand {process_op(res)} else {RVOperandType::None};
 
                 // epilogue should be binded with ret
+                if STK_FRM_MANAGER.with(|manager| manager.borrow().has_callee()) {
+                    ASM_CONTEXT.with(|asm_cxt| {
+                        let mut asm_cxt = asm_cxt.borrow_mut();
+                        // restore old fp
+                        asm_cxt.add_asm_inst(AsmInst {
+                            opcode: RVOpCode::LW,
+                            rd: Some(RVOperandType::MemWithReg {
+                                reg: RVRegCode::SP,
+                                offset: STK_FRM_MANAGER.with(|manager| manager.borrow().get_fp_offset()),
+                            }),
+                            rs1: Some(RVOperandType::Temp(RVRegCode::S0)),
+                            rs2: None,
+                            imm: None,
+                        });
+                    });
+                }
+
                 if STK_FRM_MANAGER.with(|manager| manager.borrow().has_callee()) {
                     ASM_CONTEXT.with(|asm_cxt| {
                         let mut asm_cxt = asm_cxt.borrow_mut();
@@ -668,10 +717,6 @@ fn process_op(
 
     match operand {
         IRObj::Const(val) => {
-            if *val == 0 {
-                return RVOperandType::Temp(RVRegCode::ZERO);
-            }
-
             // find a free temp reg
             if let RVOperandType::Temp(temp_reg) = match inst_data.opcode {
                 KoopaOpCode::RET => RVOperandType::Temp(RVRegCode::A0), // for return, we must use a0
@@ -739,7 +784,8 @@ fn process_op(
             }
         }
 
-        IRObj::IRVar((_, inst_id)) => {
+        IRObj::IRVar((_, inst_id))
+        | IRObj::ReturnVal { ir_var_id: _, inst_id, return_val: _ } => {
             let mem_with_reg = STK_FRM_MANAGER.with(|manager| manager.borrow().get_l_val_wrapped(operand.to_string()));
             let rs1 = match inst_data.opcode {
                 KoopaOpCode::RET => RVOperandType::Temp(RVRegCode::A0), // for return, we must use a0
@@ -818,7 +864,6 @@ fn process_op(
                     imm: None,
                 });
             });
-            temp_reg.free_temp();
 
             RVOperandType::MemWithReg {
                 reg: temp_reg.get_reg(),
