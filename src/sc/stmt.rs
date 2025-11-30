@@ -739,10 +739,7 @@ impl Statement for CloseStmt {
                 then_stmt.find_return_val();
                 else_stmt.find_return_val();
             }
-            CloseStmt::CloseWhile {
-                condition,
-                body_stmt,
-            } => {
+            CloseStmt::CloseWhile { body_stmt, .. } => {
                 body_stmt.find_return_val();
             }
         }
@@ -787,7 +784,9 @@ impl Statement for SimpleStmt {
                     KoopaOpCode::STORE,
                     vec![
                         match result {
-                            IRObj::IRVar(_) | IRObj::Const(_) | IRObj::ReturnVal { .. } => result,
+                            IRObj::IRVar { .. } | IRObj::Const(_) | IRObj::ReturnVal { .. } => {
+                                result
+                            }
                             _ => {
                                 unreachable!("{:#?} is unreachable in STORE", result)
                             }
@@ -934,7 +933,7 @@ impl Statement for SimpleStmt {
         match self {
             SimpleStmt::ReturnStmt { exp } => {
                 exp.as_ref().map(|exp| {
-                    let result = exp.pre_parse();
+                    let result = exp.evaluate();
                     match result {
                         IRObj::IRVar(_) => {
                             RETURN_TYPES.with(|ret_types| {

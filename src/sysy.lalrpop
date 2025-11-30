@@ -66,6 +66,16 @@ FuncFParams: Vec<FuncFParam> = {
 
 FuncFParam: FuncFParam = {
   <param_type: BType> <ident: Ident> => FuncFParam { param_type, ident },
+  <param_type: BType> <ident: Ident> <first_const_exp: "[" "]"> <other_const_exps: ("[" ConstExp "]")*> => FuncFParam { 
+    param_type, 
+    ident,
+    const_exps: {
+      let mut exps = vec![None];
+      for (_, exp, _) in other_const_exps {
+        exps.push(Some(exp));
+      }
+      exps
+  },
 };
 
 BType: BType = {
@@ -127,7 +137,10 @@ SimpleStmt: SimpleStmt = {
 };
 
 LVal: LVal = {
-  <ident: Ident> => LVal { ident },
+  <ident: Ident> <exps: ("[" Exp "]")*> => LVal { 
+    ident, 
+    exps: exps.into_iter().map(|(_, exp, _)| exp).collect(),
+  },
 };
 
 Decl: Decl = {
@@ -146,11 +159,22 @@ ConstDecl: ConstDecl = {
 }
 
 ConstDef: ConstDef = {
-  <ident: Ident> "=" <const_init_val: ConstInitVal> => ConstDef { <> }
+  <ident: Ident> <const_exps: ("[" ConstExp "]")*> "=" <const_init_val: ConstInitVal> => ConstDef { 
+    ident,
+    const_exps: const_exps.into_iter().map(|(_, exp, _)| exp).collect(),
+    const_init_val: RefCell::new(const_init_val),
+  }
 };
 
 ConstInitVal: ConstInitVal = {
-  <const_exp: ConstExp> => ConstInitVal { const_exp }
+  <const_exp: ConstExp> => ConstInitVal::ConstExp(const_exp)
+  "{" <first_init_val: ConstInitVal> <other_init_vals: ("," ConstInitVal)*> "}" => {
+    let mut init_vals = vec![first_init_val];
+    for (_, val) in other_init_vals {
+      init_vals.push(val);
+    }
+    ConstInitVal::ConstArrayExp(init_vals)
+  }
 };
 
 ConstExp: ConstExp = {
@@ -168,12 +192,27 @@ VarDecl: VarDecl = {
 }
 
 VarDef: VarDef = {
-  <ident: Ident> "=" <init_val: InitVal> => VarDef { ident, init_val: Some(init_val) },
-  <ident: Ident> => VarDef { ident, init_val: None },
+  <ident: Ident> <const_exps: ("[" ConstExp "]")*> "=" <init_val: InitVal> => VarDef { 
+    ident, 
+    const_exps: const_exps.into_iter().map(|(_, exp, _)| exp).collect(), 
+    init_val: RefCell::new(Some(init_val))
+  },
+  <ident: Ident> <const_exps: ("[" ConstExp "]")*> => VarDef { 
+    ident, 
+    const_exps: const_exps.into_iter().map(|(_, exp, _)| exp).collect(), 
+    init_val: RefCell::new(None)
+  },
 };
 
 InitVal: InitVal = {
-  <exp: Exp> => InitVal { exp: Box::new(exp) }
+  <exp: Exp> => InitVal::Exp(Box::new(exp)),
+  "{" <first_init_val: InitVal> <other_init_vals: ("," InitVal)*> "}" => {
+    let mut init_vals = vec![first_init_val];
+    for (_, val) in other_init_vals {
+      init_vals.push(val);
+    }
+    InitVal::ArrayExp(init_vals)
+  }
 };
 
 // The priority of MulExp is higher than AddExp, so we should parse AddExp first, 

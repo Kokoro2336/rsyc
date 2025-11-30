@@ -1,8 +1,9 @@
 use crate::global::config::BType;
 use crate::global::context::{RETURN_TYPES, SC_CONTEXT_STACK};
-use crate::ir::config::{KoopaOpCode, PTR_ID_ALLOCATOR};
+use crate::ir::config::{KoopaOpCode, SC_VAR_ID_ALLOCATOR};
 use crate::ir::koopa::{insert_ir, BasicBlock, BasicBlockType, Func, IRObj, InstData, Program};
 use crate::sc::decl::Decl;
+use crate::sc::exp::{Exp, Expression};
 use crate::sc::stmt::{Statement, Stmt};
 
 use std::cell::RefCell;
@@ -52,11 +53,18 @@ impl CompUnit {
             .global_decls
             .iter()
             .fold(vec![], |mut acc, global_decl| {
-                let parse_result = global_decl.parse_global();
-                // filter out the consts, but parsing is still needed
-                if matches!(global_decl, Decl::VarDecl { .. }) {
-                    acc.extend(parse_result)
-                };
+                let parse_result = global_decl
+                    .parse_global()
+                    .iter()
+                    .filter(|obj| {
+                        // filter out global decls that are single const decls
+                        !(matches!(global_decl, Decl::ConstDecl { .. })
+                            && matches!(obj, IRObj::Const(_)))
+                    })
+                    .cloned()
+                    .collect::<Vec<IRObj>>();
+
+                acc.extend(parse_result);
                 acc
             });
 
@@ -69,7 +77,14 @@ impl CompUnit {
                 Some(RETURN_TYPES.with(|ret_types| ret_types.borrow_mut().analyze_return_type()));
         });
 
-        println!("{:#?}", &self.func_defs.iter().map(|f| (&f.ident, f.return_val.borrow().clone())).collect::<Vec<(&String, Option<ReturnVal>)>>());
+        println!(
+            "{:#?}",
+            &self
+                .func_defs
+                .iter()
+                .map(|f| (&f.ident, f.return_val.borrow().clone()))
+                .collect::<Vec<(&String, Option<ReturnVal>)>>()
+        );
 
         if !self
             .func_defs
@@ -154,7 +169,7 @@ impl FuncDef {
 
     fn init_func_param(&self) {
         self.params.iter().enumerate().for_each(|(index, param)| {
-            let sc_var_id = PTR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc());
+            let sc_var_id = SC_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc());
             let sc_var = IRObj::ScVar {
                 initialized: true,
                 sc_var_id,
@@ -200,6 +215,7 @@ pub struct Block {
 pub struct FuncFParam {
     pub param_type: BType,
     pub ident: String,
+    pub const_exps: Vec<Option<Exp>>,
 }
 
 impl std::fmt::Display for FuncFParam {
@@ -277,11 +293,24 @@ impl BlockItem {
 #[derive(Debug, Clone)]
 pub struct LVal {
     pub ident: String,
+    pub exps: Vec<Exp>,
 }
 
 impl std::fmt::Display for LVal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.ident);
+        if self.exps.len() > 0 {
+            write!(
+                f,
+                "{}{}",
+                self.ident,
+                self.exps
+                    .iter()
+                    .map(|exp| format!("[{}]", exp.evaluate().to_string()))
+                    .collect::<String>()
+            );
+        } else {
+            write!(f, "{}", self.ident);
+        }
         Ok(())
     }
 }

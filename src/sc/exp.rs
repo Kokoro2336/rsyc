@@ -1,14 +1,14 @@
 use crate::global::config::BType;
 use crate::global::context::SC_CONTEXT_STACK;
 use crate::ir::config::{KoopaOpCode, IR_VAR_ID_ALLOCATOR};
-use crate::ir::koopa::{insert_ir, IRObj, InstData};
+use crate::ir::koopa::{insert_ir, parse_arr_item, IRObj, InstData};
 use crate::sc::ast::{LVal, ReturnVal};
 use crate::sc::op::*;
 
 pub trait Expression {
     fn parse_var_exp(&self) -> IRObj;
     fn parse_const_exp(&self) -> IRObj;
-    fn pre_parse(&self) -> IRObj;
+    fn evaluate(&self) -> IRObj;
 }
 
 #[derive(Debug, Clone)]
@@ -20,19 +20,19 @@ impl Expression for Exp {
     /// parse_unary_exp
     fn parse_var_exp(&self) -> IRObj {
         match self {
-            Exp::LOrExp { lor_exp } => return lor_exp.parse_var_exp(),
+            Exp::LOrExp { lor_exp } => lor_exp.parse_var_exp(),
         }
     }
 
     fn parse_const_exp(&self) -> IRObj {
         match self {
-            Exp::LOrExp { lor_exp } => return lor_exp.parse_const_exp(),
+            Exp::LOrExp { lor_exp } => lor_exp.parse_const_exp(),
         }
     }
 
-    fn pre_parse(&self) -> IRObj {
+    fn evaluate(&self) -> IRObj {
         match self {
-            Exp::LOrExp { lor_exp } => return lor_exp.pre_parse(),
+            Exp::LOrExp { lor_exp } => lor_exp.evaluate(),
         }
     }
 }
@@ -176,9 +176,7 @@ impl Expression for LOrExp {
 
     fn parse_const_exp(&self) -> IRObj {
         match self {
-            LOrExp::LAndExp { land_exp } => {
-                return land_exp.parse_const_exp();
-            }
+            LOrExp::LAndExp { land_exp } => land_exp.parse_const_exp(),
             LOrExp::LOrExp {
                 lor_exp,
                 lor_op,
@@ -209,23 +207,23 @@ impl Expression for LOrExp {
         }
     }
 
-    fn pre_parse(&self) -> IRObj {
+    fn evaluate(&self) -> IRObj {
         match self {
-            LOrExp::LAndExp { land_exp } => land_exp.pre_parse(),
+            LOrExp::LAndExp { land_exp } => land_exp.evaluate(),
 
             LOrExp::LOrExp {
                 lor_exp,
                 lor_op: _,
                 land_exp,
             } => {
-                let left = lor_exp.pre_parse();
+                let left = lor_exp.evaluate();
                 // perform short-circuit evaluation for logical OR
                 match &left {
                     IRObj::Const(v) if *v != 0 => return IRObj::Const(1),
                     _ => {}
                 }
 
-                let right = land_exp.pre_parse();
+                let right = land_exp.evaluate();
                 match &right {
                     IRObj::Const(v) if *v != 0 => return IRObj::Const(1),
                     _ => {}
@@ -407,22 +405,22 @@ impl Expression for LAndExp {
         }
     }
 
-    fn pre_parse(&self) -> IRObj {
+    fn evaluate(&self) -> IRObj {
         match self {
-            LAndExp::EqExp { eq_exp } => eq_exp.pre_parse(),
+            LAndExp::EqExp { eq_exp } => eq_exp.evaluate(),
             LAndExp::LAndExp {
                 land_exp,
                 land_op: _,
                 eq_exp,
             } => {
-                let left = land_exp.pre_parse();
+                let left = land_exp.evaluate();
                 // short-circuit for logical AND
                 match &left {
                     IRObj::Const(v) if *v == 0 => return IRObj::Const(0),
                     _ => {}
                 }
 
-                let right = eq_exp.pre_parse();
+                let right = eq_exp.evaluate();
                 match &right {
                     IRObj::Const(v) if *v == 0 => return IRObj::Const(0),
                     _ => {}
@@ -529,16 +527,16 @@ impl Expression for EqExp {
         }
     }
 
-    fn pre_parse(&self) -> IRObj {
+    fn evaluate(&self) -> IRObj {
         match self {
-            EqExp::RelExp { rel_exp } => rel_exp.pre_parse(),
+            EqExp::RelExp { rel_exp } => rel_exp.evaluate(),
             EqExp::EqExp {
                 eq_exp,
                 eq_op,
                 rel_exp,
             } => {
-                let left = eq_exp.pre_parse();
-                let right = rel_exp.pre_parse();
+                let left = eq_exp.evaluate();
+                let right = rel_exp.evaluate();
 
                 match (&left, &right) {
                     (IRObj::Const(l), IRObj::Const(r)) => {
@@ -651,16 +649,16 @@ impl Expression for RelExp {
         }
     }
 
-    fn pre_parse(&self) -> IRObj {
+    fn evaluate(&self) -> IRObj {
         match self {
-            RelExp::AddExp { add_exp } => add_exp.pre_parse(),
+            RelExp::AddExp { add_exp } => add_exp.evaluate(),
             RelExp::RelExp {
                 rel_exp,
                 rel_op,
                 add_exp,
             } => {
-                let left = rel_exp.pre_parse();
-                let right = add_exp.pre_parse();
+                let left = rel_exp.evaluate();
+                let right = add_exp.evaluate();
 
                 match (&left, &right) {
                     (IRObj::Const(l), IRObj::Const(r)) => {
@@ -829,16 +827,16 @@ impl Expression for UnaryExp {
         }
     }
 
-    fn pre_parse(&self) -> IRObj {
+    fn evaluate(&self) -> IRObj {
         match self {
-            UnaryExp::PrimaryExp { exp } => exp.pre_parse(),
+            UnaryExp::PrimaryExp { exp } => exp.evaluate(),
             // TODO: this one isn't very accurate
             UnaryExp::FunctionCall { ident: _, args: _ } => IRObj::IRVar((0, 0)),
             UnaryExp::UnaryExp {
                 unary_op,
                 unary_exp,
             } => {
-                let inner = unary_exp.pre_parse();
+                let inner = unary_exp.evaluate();
                 match inner {
                     IRObj::Const(v) => match unary_op {
                         UnaryOp::Plus => IRObj::Const(v),
@@ -945,16 +943,16 @@ impl Expression for MulExp {
         }
     }
 
-    fn pre_parse(&self) -> IRObj {
+    fn evaluate(&self) -> IRObj {
         match self {
-            MulExp::UnaryExp { unary_exp } => unary_exp.pre_parse(),
+            MulExp::UnaryExp { unary_exp } => unary_exp.evaluate(),
             MulExp::MulExp {
                 mul_exp,
                 mul_op,
                 unary_exp,
             } => {
-                let left = mul_exp.pre_parse();
-                let right = unary_exp.pre_parse();
+                let left = mul_exp.evaluate();
+                let right = unary_exp.evaluate();
                 match (&left, &right) {
                     (IRObj::Const(l), IRObj::Const(r)) => {
                         let res = match mul_op {
@@ -1063,16 +1061,16 @@ impl Expression for AddExp {
         }
     }
 
-    fn pre_parse(&self) -> IRObj {
+    fn evaluate(&self) -> IRObj {
         match self {
-            AddExp::MulExp { mul_exp } => mul_exp.pre_parse(),
+            AddExp::MulExp { mul_exp } => mul_exp.evaluate(),
             AddExp::AddExp {
                 add_exp,
                 add_op,
                 mul_exp,
             } => {
-                let left = add_exp.pre_parse();
-                let right = mul_exp.pre_parse();
+                let left = add_exp.evaluate();
+                let right = mul_exp.evaluate();
                 match (&left, &right) {
                     (IRObj::Const(l), IRObj::Const(r)) => {
                         let res = match add_op {
@@ -1102,9 +1100,9 @@ impl Expression for PrimaryExp {
             PrimaryExp::Exp { exp } => exp.parse_var_exp(),
 
             PrimaryExp::LVal { l_val } => {
-                match SC_CONTEXT_STACK
-                    .with(|stack| stack.borrow().find_highest_priority(&l_val.ident))
-                {
+                let result = SC_CONTEXT_STACK
+                    .with(|stack| stack.borrow().find_highest_priority(&l_val.ident));
+                match result {
                     Some(IRObj::ScVar {
                         initialized,
                         sc_var_id,
@@ -1160,6 +1158,10 @@ impl Expression for PrimaryExp {
                         ir_obj
                     }
 
+                    Some(IRObj::Array { .. }) => {
+                        parse_arr_item(result.as_ref().unwrap(), l_val.exps.as_ref())
+                    }
+
                     _ => {
                         panic!(
                             "LVal {l_val} not found in var table, maybe the ident is not defined"
@@ -1176,6 +1178,10 @@ impl Expression for PrimaryExp {
             PrimaryExp::Exp { exp } => exp.parse_const_exp(),
 
             PrimaryExp::LVal { l_val } => {
+                if !l_val.exps.is_empty() {
+                    panic!("You couldn't deref and array in ConstExp: {}", &l_val,)
+                }
+
                 if let Some(value) =
                     SC_CONTEXT_STACK.with(|stack| stack.borrow().get_latest_const(&l_val.ident))
                 {
@@ -1187,10 +1193,10 @@ impl Expression for PrimaryExp {
         }
     }
 
-    fn pre_parse(&self) -> IRObj {
+    fn evaluate(&self) -> IRObj {
         match self {
             PrimaryExp::Number { value } => IRObj::Const(*value),
-            PrimaryExp::Exp { exp } => exp.pre_parse(),
+            PrimaryExp::Exp { exp } => exp.evaluate(),
             PrimaryExp::LVal { l_val } => {
                 if let Some(value) =
                     SC_CONTEXT_STACK.with(|stack| stack.borrow().get_latest_const(&l_val.ident))

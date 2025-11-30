@@ -20,7 +20,11 @@ impl std::fmt::Display for Asm {
         // declaration for global values
         for val in &self.global_vals {
             writeln!(f, "    .data")?;
-            writeln!(f, "    .globl {}", val.name)?;
+            writeln!(f, "    .globl {}", match val {
+                AsmGlobalVal::GlobalVar { name, .. } => name,
+                AsmGlobalVal::Array { name, .. } => name,
+                AsmGlobalVal::GlobalConst(_) => unreachable!("GlobalConst couldn't only nest in Array!"),
+            })?;
             writeln!(f, "{}", val)?;
         }
 
@@ -53,8 +57,35 @@ impl Asm {
         program.global_vals.iter().for_each(|val| {
             match val {
                 IRObj::GlobalVar { initialized, global_var_id, init_val } => {
-                    asm.global_vals.push(AsmGlobalVal 
+                    asm.global_vals.push(AsmGlobalVal::GlobalVar 
                         { name: global_var_id.clone(), init_val: *init_val, initialized: *initialized })
+                },
+                IRObj::Array { ident, vals, .. } => {
+                    fn flatten(vals: &Vec<IRObj>) -> Vec<AsmGlobalVal> {
+                        let mut res: Vec<AsmGlobalVal> = Vec::new();
+                        for val in vals {
+                            match val {
+                                IRObj::Array { vals: inner_vals, .. } => {
+                                    res.extend(flatten(inner_vals.as_ref().expect("Global Array should have initialized vals!")));
+                                },
+                                IRObj::GlobalVar { initialized, global_var_id, init_val } => {
+                                    res.push(AsmGlobalVal::GlobalVar {
+                                        name: global_var_id.clone(),
+                                        init_val: *init_val,
+                                        initialized: *initialized,
+                                    });
+                                }
+                                IRObj::Const(c) => {
+                                    res.push(AsmGlobalVal::GlobalConst(*c));
+                                }
+                                _ => unreachable!("Only GlobalVar and Array can be converted to AsmGlobalVal!"),
+                            }
+                        }
+                        res
+                    }
+
+                    let vals = flatten(vals.as_ref().expect("Global Array should have initialized vals!"));
+                    asm.global_vals.push(AsmGlobalVal::Array { name: ident.clone(), vals });
                 },
                 _ => unreachable!("Only GlobalVar can be converted to AsmGlobalVal!"),
             }
@@ -80,29 +111,83 @@ impl Asm {
 
 }
 
-pub struct AsmGlobalVal {
-    pub name: String,
-    pub init_val: i32,
-    pub initialized: bool,
+pub enum AsmGlobalVal {
+    GlobalVar {
+        name: String,
+        init_val: i32,
+        initialized: bool,
+    },
+    Array {
+        name: String,
+        vals: Vec<AsmGlobalVal>,
+    },
+    // this could only occur in global const array
+    GlobalConst(i32),
 }
 
 impl std::fmt::Display for AsmGlobalVal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{}:", self.name)?;
+        match self {
+            AsmGlobalVal::GlobalVar {name, init_val, initialized} => {
+                writeln!(f, "{}:", name)?;
 
-        if !self.initialized && self.init_val == 0 {
-            writeln!(f, "    .zero 4")?;
+                if !initialized && *init_val == 0 {
+                    writeln!(f, "    .zero 4")?;
 
-        } else {
-            writeln!(f, "    .word {}", self.init_val)?;
+                } else {
+                    writeln!(f, "    .word {}", init_val)?;
+                }
+            },
+
+            AsmGlobalVal::Array {name, vals} => {
+                writeln!(f, "{}:", name)?;
+                let (zero_size, non_zero_idx) = vals.iter().enumerate().rev().fold((0, -1), |(mut acc, mut non_zero_idx), (idx, val)| {
+                    let idx = idx as i32;
+
+                    if idx != -1 {
+                        return (acc, non_zero_idx);
+                    } else {
+                        match val {
+                            AsmGlobalVal::GlobalVar { init_val, .. } => {
+                                if *init_val == 0 {
+                                    acc += 4;
+                                } else {
+                                    non_zero_idx = idx;
+                                }
+                                (acc, non_zero_idx)
+                            },
+                            AsmGlobalVal::GlobalConst(c) => {
+                                if *c == 0 {
+                                    acc += 4;
+                                } else {
+                                    non_zero_idx = idx;
+                                }
+                                (acc, non_zero_idx)
+                            },
+                            _ => (acc, non_zero_idx),
+                        }
+                    }
+                });
+
+                vals[0..=non_zero_idx as usize].iter().for_each(|val| {
+                    match val {
+                        AsmGlobalVal::GlobalVar { init_val, .. } => {
+                            writeln!(f, "    .word {}", init_val);
+                        }
+                        AsmGlobalVal::GlobalConst(c) => {
+                            writeln!(f, "    .word {}", c);
+                        }
+                        _ => {
+                            unreachable!("Only GlobalVar can be converted to AsmGlobalVal!");
+                        }
+                    }
+                });
+                writeln!(f, "    .zero {}", zero_size)?;
+            },
+
+            AsmGlobalVal::GlobalConst(_) => unreachable!("GlobalConst couldn't only nest in Array!"),
         }
         Ok(())
-    }
-}
-
-impl AsmGlobalVal {
-    pub fn new(name: String, init_val: i32, initialized: bool) -> Self {
-        Self { name, init_val, initialized }
     }
 }
 
@@ -504,6 +589,67 @@ impl AsmInst {
                 RVOperandType::None
             }
 
+            KoopaOpCode::GETELEMPTR => {
+                let typ = inst_data.typ.clone();
+                let rs1 = process_op(&IRObj::Const(typ.size_in_bytes() as i32));
+                let rs2 = process_op(inst_data.operands.get(1).unwrap());
+
+                let rd1 = RVREG_ALLOCATOR.with(|allocator| allocator.borrow_mut().find_and_occupy_temp_reg(*inst));
+                ASM_CONTEXT.with(|asm_cxt| {
+                    asm_cxt.borrow_mut().add_asm_inst(AsmInst {
+                        opcode: RVOpCode::MUL,
+                        rd: Some(rd1.clone()),
+                        rs1: Some(rs1.clone()),
+                        rs2: Some(rs2.clone()),
+                        imm: None,
+                    });
+                });
+                rs1.free_temp(); rs2.free_temp();
+
+                let rs1 = process_op(inst_data.operands.first().unwrap());
+                let rd2 = RVREG_ALLOCATOR.with(|allocator| allocator.borrow_mut().find_and_occupy_temp_reg(*inst));
+                ASM_CONTEXT.with(|asm_cxt| {
+                    asm_cxt.borrow_mut().add_asm_inst(AsmInst {
+                        opcode: RVOpCode::ADD,
+                        rd: Some(rd2.clone()),
+                        rs1: Some(RVOperandType::Temp(rs1.get_reg())),
+                        rs2: None,
+                        imm: Some(rs1.get_offset() as i32),
+                    });
+                });
+                rs1.free_temp();
+
+                let rd3 = RVREG_ALLOCATOR.with(|allocator| allocator.borrow_mut().find_and_occupy_temp_reg(*inst));
+                ASM_CONTEXT.with(|asm_cxt| {
+                    asm_cxt.borrow_mut().add_asm_inst(AsmInst {
+                        opcode: RVOpCode::ADD,
+                        rd: Some(rd3.clone()),
+                        rs1: Some(RVOperandType::Temp(rd2.get_reg())),
+                        rs2: Some(RVOperandType::Temp(rd1.get_reg())),
+                        imm: None,
+                    });
+                });
+                rd1.free_temp(); rd2.free_temp();
+
+                ASM_CONTEXT.with(|asm_cxt| {
+                    asm_cxt.borrow_mut().add_asm_inst(AsmInst {
+                        opcode: RVOpCode::SW,
+                        rd: None,
+                        rs1: Some(STK_FRM_MANAGER.with(|manager| manager.borrow_mut().alloc_l_val_wrapped(inst_data.ir_obj.to_string(), inst_data.typ.clone()))),
+                        rs2: Some(rd3.clone()),
+                        imm: None,
+                    });
+                });
+                rd3.free_temp();
+
+                RVOperandType::None
+            }
+
+            // TODO
+            KoopaOpCode::GETPTR => {
+                unimplemented!()
+            }
+
             KoopaOpCode::STORE => {
                 let rs1 = process_op(inst_data.operands.get(1).unwrap());    
                 let rs2 = process_op(inst_data.operands.first().unwrap());
@@ -849,7 +995,8 @@ fn process_op(
             rs1
         }
 
-        IRObj::ScVar {..} => {
+        IRObj::ScVar {..}
+        | IRObj::Array {..} => {
             STK_FRM_MANAGER.with(|manager| manager.borrow().get_l_val_wrapped(operand.to_string()))
         }
 

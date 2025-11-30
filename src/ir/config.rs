@@ -28,6 +28,8 @@ pub enum KoopaOpCode {
     CALL,
     BR,
     JUMP,
+    GETPTR,
+    GETELEMPTR,
     RET,
 }
 
@@ -57,6 +59,8 @@ impl std::fmt::Display for KoopaOpCode {
             KoopaOpCode::CALL => write!(f, "call"),
             KoopaOpCode::BR => write!(f, "br"),
             KoopaOpCode::JUMP => write!(f, "jump"),
+            KoopaOpCode::GETPTR => write!(f, "getptr"),
+            KoopaOpCode::GETELEMPTR => write!(f, "getelemptr"),
             KoopaOpCode::RET => write!(f, "ret"),
         }
     }
@@ -85,7 +89,7 @@ impl IdAllocator {
 
 thread_local! {
     // initialize sc_var id allocator
-    pub static PTR_ID_ALLOCATOR: RefCell<IdAllocator> = RefCell::new(IdAllocator::new());
+    pub static SC_VAR_ID_ALLOCATOR: RefCell<IdAllocator> = RefCell::new(IdAllocator::new());
     // initialize koopa ir block id allocator
     pub static BLOCK_ID_ALLOCATOR: RefCell<IdAllocator> = RefCell::new(IdAllocator::new());
     // initialize ir inst id allocator
@@ -110,8 +114,11 @@ thread_local! {
             func_type: BType::Int,
             ident: "getarray".to_string(),
             params: vec![FuncFParam {
-                param_type: BType::Pointer(Box::new(BType::Int)),
+                param_type: BType::Pointer {
+                    typ: Box::new(BType::Int),
+                },
                 ident: "".to_string(),
+                const_exps: vec![],
             }],
             block: Block { block_items: vec![] },
             return_val: RefCell::new(Some(ReturnVal::Other)),
@@ -122,6 +129,7 @@ thread_local! {
             params: vec![FuncFParam {
                 param_type: BType::Int,
                 ident: "".to_string(),
+                const_exps: vec![],
             }],
             block: Block { block_items: vec![] },
             return_val: RefCell::new(Some(ReturnVal::Other)),
@@ -132,6 +140,7 @@ thread_local! {
             params: vec![FuncFParam {
                 param_type: BType::Int,
                 ident: "".to_string(),
+                const_exps: vec![],
             }],
             block: Block { block_items: vec![] },
             return_val: RefCell::new(Some(ReturnVal::Other)),
@@ -143,10 +152,15 @@ thread_local! {
                 FuncFParam {
                     param_type: BType::Int,
                     ident: "".to_string(),
+                    const_exps: vec![],
                 },
                 FuncFParam {
-                    param_type: BType::Pointer(Box::new(BType::Int)),
+                    param_type: BType::Array {
+                        typ: Box::new(BType::Unknown),
+                        len: 0,
+                    },
                     ident: "".to_string(),
+                    const_exps: vec![],
                 },
             ],
             block: Block { block_items: vec![] },

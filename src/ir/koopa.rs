@@ -2,8 +2,9 @@ use crate::asm::config::RVRegCode;
 use crate::asm::reg::RVREG_ALLOCATOR;
 use crate::global::config::BType;
 use crate::global::context::SC_CONTEXT_STACK;
-use crate::ir::config::{KoopaOpCode, BLOCK_ID_ALLOCATOR, SYSY_STD_LIB};
+use crate::ir::config::{KoopaOpCode, BLOCK_ID_ALLOCATOR, IR_VAR_ID_ALLOCATOR, SYSY_STD_LIB};
 use crate::sc::ast::{FuncFParam, ReturnVal};
+use crate::sc::exp::{Exp, Expression};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -52,27 +53,45 @@ impl std::fmt::Display for Program {
 
         // print global vals
         for global_val in &self.global_vals {
-            if let IRObj::GlobalVar {
-                initialized,
-                global_var_id,
-                init_val,
-            } = global_val
-            {
-                writeln!(
-                    f,
-                    "global @{} = alloc {}, {}",
+            match global_val {
+                IRObj::Array {
+                    ident, typ, vals, ..
+                } => {
+                    writeln!(
+                        f,
+                        "global @{} = alloc {}, {{{}}}",
+                        ident,
+                        typ,
+                        vals.as_ref()
+                            .expect("Global Array should have init vals!")
+                            .iter()
+                            .map(|init_val| init_val.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )?;
+                }
+
+                IRObj::GlobalVar {
+                    initialized,
                     global_var_id,
-                    BType::Int,
-                    if *initialized {
-                        init_val.to_string()
-                    } else if !*initialized && *init_val == 0 {
-                        IRObj::ZeroInit.to_string()
-                    } else {
-                        panic!("Invalid global variable initialization")
-                    }
-                )?;
-            } else {
-                panic!("Invalid global value: {:?}", global_val);
+                    init_val,
+                } => {
+                    writeln!(
+                        f,
+                        "global @{} = alloc {}, {}",
+                        global_var_id,
+                        BType::Int,
+                        if *initialized {
+                            init_val.to_string()
+                        } else if !*initialized && *init_val == 0 {
+                            IRObj::ZeroInit.to_string()
+                        } else {
+                            panic!("Invalid global variable initialization")
+                        }
+                    )?;
+                }
+
+                _ => unreachable!("Invalid global value: {:?}", global_val),
             }
         }
         writeln!(f)?;
@@ -419,6 +438,13 @@ pub enum IRObj {
         global_var_id: String,
         init_val: i32,
     },
+    // init values in array
+    Array {
+        ident: String,
+        typ: BType,
+        dimensions: Vec<u32>,
+        vals: Option<Vec<IRObj>>,
+    },
     ReturnVal {
         ir_var_id: IRVarId,
         inst_id: InstId,
@@ -456,6 +482,23 @@ impl IRObj {
             _ => panic!("Not an instruction ID: {:?}", self),
         }
     }
+
+    pub fn new_ir_var() -> Self {
+        IRObj::IRVar((
+            IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
+            SC_CONTEXT_STACK
+                .with(|stack| stack.borrow().get_current_dfg().borrow().get_next_inst_id()),
+        ))
+    }
+}
+
+impl IntoIterator for IRObj {
+    type Item = IRObj;
+    type IntoIter = std::vec::IntoIter<IRObj>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        vec![self].into_iter()
+    }
 }
 
 impl ToString for IRObj {
@@ -463,7 +506,6 @@ impl ToString for IRObj {
         match self {
             IRObj::IRVar((ir_var_id, _)) => format!("%{}", ir_var_id),
             IRObj::Const(c) => format!("{}", c),
-            IRObj::BType(b_type) => format!("{}", b_type),
             IRObj::ScVar {
                 initialized: _,
                 sc_var_id,
@@ -473,13 +515,17 @@ impl ToString for IRObj {
                 global_var_id,
                 init_val: _,
             } => format!("@{}", global_var_id),
-            IRObj::FuncSym(block_id) => format!("{}", block_id),
+            IRObj::Array { ident, .. } => format!("@{}", ident),
             IRObj::ReturnVal {
                 ir_var_id,
                 inst_id: _,
                 return_val: _,
             } => format!("%{}", ir_var_id),
+
+            IRObj::BType(b_type) => format!("{}", b_type),
             IRObj::ZeroInit => "zeroinit".to_string(),
+            IRObj::FuncSym(block_id) => format!("{}", block_id),
+
             IRObj::Args(args) => args
                 .iter()
                 .map(|arg| arg.to_string())
@@ -490,6 +536,7 @@ impl ToString for IRObj {
                 idx: _,
                 ident,
             } => format!("#{ident}"),
+
             IRObj::None => "".to_string(),
         }
     }
@@ -578,4 +625,53 @@ pub fn insert_ir(inst_data: InstData) -> InstId {
 
     inst_list_mut.push(inst_id);
     inst_id
+}
+
+/// @return: IRObj::Var | IRObj::Const | IRObj::Returnval
+pub fn parse_arr_item(array: &IRObj, indexes: &Vec<Exp>) -> IRObj {
+    let typ = match &array {
+        IRObj::Array {
+            typ, dimensions, ..
+        } => typ.clone(),
+        _ => panic!("Not an array type: {:?}", array),
+    };
+
+    let (final_ptr, final_typ) = indexes
+        .iter()
+        .fold(
+            (IRObj::None, typ.clone()),
+            |(mut ir_obj, mut cur_typ), index_exp| {
+                let result = index_exp.parse_var_exp();
+
+                // TODO: boudary check
+                ir_obj = IRObj::IRVar((
+                    IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
+                    SC_CONTEXT_STACK
+                        .with(|stack| stack.borrow().get_current_dfg().borrow().get_next_inst_id()),
+                ));
+
+                let typ = match &cur_typ {
+                    BType::Array { typ, len: _ } => BType::Pointer { typ: typ.clone() },
+                    _ => panic!("Array type expected"),
+                };
+                insert_ir(InstData::new(
+                    typ.clone(),
+                    ir_obj.clone(),
+                    KoopaOpCode::GETELEMPTR,
+                    vec![result],
+                ));
+
+                (ir_obj, typ)
+            },
+        );
+
+    let ir_obj = IRObj::new_ir_var();
+    insert_ir(InstData::new(
+        final_typ.clone(),
+        ir_obj.clone(),
+        KoopaOpCode::LOAD,
+        vec![final_ptr.clone()],
+    ));
+
+    ir_obj
 }
