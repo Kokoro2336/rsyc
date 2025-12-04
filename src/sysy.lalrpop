@@ -65,8 +65,8 @@ FuncFParams: Vec<FuncFParam> = {
 };
 
 FuncFParam: FuncFParam = {
-  <param_type: BType> <ident: Ident> => FuncFParam { param_type, ident },
-  <param_type: BType> <ident: Ident> <first_const_exp: "[" "]"> <other_const_exps: ("[" ConstExp "]")*> => FuncFParam { 
+  <param_type: BType> <ident: Ident> => FuncFParam { param_type, ident, const_exps: vec![] },
+  <param_type: BType> <ident: Ident> <first_const_exp: ("[" "]")> <other_const_exps: ("[" ConstExp "]")*> => FuncFParam { 
     param_type, 
     ident,
     const_exps: {
@@ -75,7 +75,8 @@ FuncFParam: FuncFParam = {
         exps.push(Some(exp));
       }
       exps
-  },
+    }
+  }
 };
 
 BType: BType = {
@@ -167,7 +168,7 @@ ConstDef: ConstDef = {
 };
 
 ConstInitVal: ConstInitVal = {
-  <const_exp: ConstExp> => ConstInitVal::ConstExp(const_exp)
+  <const_exp: ConstExp> => ConstInitVal::ConstExp(const_exp),
   "{" <first_init_val: ConstInitVal> <other_init_vals: ("," ConstInitVal)*> "}" => {
     let mut init_vals = vec![first_init_val];
     for (_, val) in other_init_vals {

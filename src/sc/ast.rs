@@ -2,7 +2,7 @@ use crate::global::config::BType;
 use crate::global::context::{RETURN_TYPES, SC_CONTEXT_STACK};
 use crate::ir::config::{KoopaOpCode, SC_VAR_ID_ALLOCATOR};
 use crate::ir::koopa::{insert_ir, BasicBlock, BasicBlockType, Func, IRObj, InstData, Program};
-use crate::sc::decl::Decl;
+use crate::sc::decl::{Decl, ConstExp};
 use crate::sc::exp::{Exp, Expression};
 use crate::sc::stmt::{Statement, Stmt};
 
@@ -215,7 +215,7 @@ pub struct Block {
 pub struct FuncFParam {
     pub param_type: BType,
     pub ident: String,
-    pub const_exps: Vec<Option<Exp>>,
+    pub const_exps: Vec<Option<ConstExp>>,
 }
 
 impl std::fmt::Display for FuncFParam {
