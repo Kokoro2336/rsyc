@@ -1,4 +1,4 @@
-use crate::global::config::BType;
+use crate::global::config::{eval_typ, BType};
 use crate::global::context::SC_CONTEXT_STACK;
 use crate::ir::config::{KoopaOpCode, IR_VAR_ID_ALLOCATOR, SC_VAR_ID_ALLOCATOR};
 use crate::ir::koopa::{insert_ir, IRObj, InstData};
@@ -6,6 +6,7 @@ use crate::sc::exp::{Exp, Expression};
 
 use std::cell::RefCell;
 use std::cmp::min;
+use std::ops::Deref;
 use std::vec::Vec;
 use tool::prelude::*;
 
@@ -50,6 +51,9 @@ pub struct ConstDecl {
 
 impl ConstDecl {
     fn parse(&self) {
+        emit_cur_decl(Decl::ConstDecl {
+            const_decl: self.clone(),
+        });
         for const_def in &self.const_defs {
             let result = const_def.parse();
             SC_CONTEXT_STACK.with(|stack| {
@@ -61,6 +65,9 @@ impl ConstDecl {
     }
 
     fn parse_global(&self) -> Vec<IRObj> {
+        emit_cur_decl(Decl::ConstDecl {
+            const_decl: self.clone(),
+        });
         self.const_defs
             .iter()
             .map(|const_def| {
@@ -152,15 +159,33 @@ impl Declaration for ConstDef {
             panic!("Constant {} already declared", self.ident);
         }
 
+        let old_typ = get_cur_type();
+        let indexes = self
+            .const_exps
+            .iter()
+            .map(|const_exp| match const_exp.parse() {
+                IRObj::Const(c) => c as u32,
+                _ => unreachable!("ConstExp must parse to Const"),
+            })
+            .collect::<Vec<u32>>();
+
         if !self.const_exps.is_empty() {
             *self.const_init_val.borrow_mut() = self.fill_array();
         }
+        let typ = eval_typ(get_cur_decl_type(), &indexes, 0);
+        emit_cur_type(typ.clone());
+
         let mut result = self.const_init_val.borrow().parse();
+
+        emit_cur_type(old_typ);
 
         match &mut result {
             IRObj::Const(_) => result,
-            IRObj::Array { ident, .. } => {
+            IRObj::Array { ident, typ, .. } => {
                 *ident = self.ident.clone();
+                *typ = BType::Pointer {
+                    typ: Box::new(typ.clone()),
+                };
                 result
             }
             _ => unreachable!(
@@ -171,15 +196,33 @@ impl Declaration for ConstDef {
     }
 
     fn parse_global(&self) -> IRObj {
+        let old_typ = get_cur_type();
+        let indexes = self
+            .const_exps
+            .iter()
+            .map(|const_exp| match const_exp.parse() {
+                IRObj::Const(c) => c as u32,
+                _ => unreachable!("ConstExp must parse to Const"),
+            })
+            .collect::<Vec<u32>>();
+
+        let typ = eval_typ(get_cur_decl_type(), &indexes, 0);
+        emit_cur_type(typ.clone());
+
         if !self.const_exps.is_empty() {
             *self.const_init_val.borrow_mut() = self.fill_array();
         }
         let mut result = self.const_init_val.borrow().parse();
 
+        emit_cur_type(old_typ);
+
         match &mut result {
             IRObj::Const(_) => result,
-            IRObj::Array { ident, .. } => {
+            IRObj::Array { ident, typ, .. } => {
                 *ident = self.ident.clone();
+                *typ = BType::Pointer {
+                    typ: Box::new(typ.clone()),
+                };
                 result
             }
             _ => unreachable!(
@@ -375,23 +418,6 @@ impl Declaration for VarDef {
             })
             .collect::<Vec<u32>>();
 
-        fn eval_typ(origin_typ: BType, indexes: &Vec<u32>, depth: usize) -> BType {
-            if depth >= indexes.len() {
-                return origin_typ.clone();
-            }
-
-            match origin_typ {
-                BType::Array { .. } => unreachable!(
-                    "Cannot init array with array type directly, origin type must be base type"
-                ),
-                BType::Void => unreachable!("Cannot init array with void type"),
-                _ => BType::Array {
-                    typ: Box::new(eval_typ(origin_typ, indexes, depth + 1)),
-                    len: indexes[depth],
-                },
-            }
-        }
-
         let old_typ = get_cur_type();
         let typ = eval_typ(get_cur_decl_type(), &indexes, 0);
         emit_cur_type(typ.clone());
@@ -399,13 +425,18 @@ impl Declaration for VarDef {
         let var_id = SC_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc());
         let var = if self.const_exps.is_empty() {
             IRObj::ScVar {
+                typ: BType::Pointer {
+                    typ: Box::new(typ.clone()),
+                },
                 initialized: self.init_val.borrow().is_some(),
                 sc_var_id: var_id, // placeholder, will be replaced
             }
         } else {
             IRObj::Array {
                 ident: self.ident.clone(),
-                typ: typ.clone(),
+                typ: BType::Pointer {
+                    typ: Box::new(typ.clone()),
+                },
                 dimensions: indexes.clone(),
                 // to be filled later
                 vals: None,
@@ -413,34 +444,20 @@ impl Declaration for VarDef {
         };
 
         // whatever the init_val is, we need to allocate space for the variable
-        let alloc_inst_id = insert_ir(InstData::new(
-            BType::Pointer { typ: Box::new(typ) },
+        insert_ir(InstData::new(
+            BType::Pointer {
+                typ: Box::new(typ.clone()),
+            },
             var.clone(),
             KoopaOpCode::ALLOC,
-            vec![
-                // to be filled later
-            ],
+            vec![IRObj::BType(typ)],
         ));
 
         let old_obj = get_cur_obj();
         emit_cur_obj(var.clone());
 
         if let Some(init_val) = self.init_val.borrow().as_ref() {
-            let parse_result = init_val.parse();
-            SC_CONTEXT_STACK.with(|stack| {
-                stack
-                    .borrow_mut()
-                    .get_current_dfg()
-                    .borrow_mut()
-                    .append_operands(
-                        alloc_inst_id,
-                        match parse_result {
-                            IRObj::Array { typ, .. } => vec![IRObj::BType(typ)],
-                            // TODO: use Int to hold place temporarily
-                            _ => vec![IRObj::BType(BType::Int)],
-                        },
-                    );
-            });
+            init_val.parse();
         };
 
         emit_cur_obj(old_obj);
@@ -456,14 +473,32 @@ impl Declaration for VarDef {
             panic!("Global variable {} already declared", self.ident);
         }
 
+        let indexes = self
+            .const_exps
+            .iter()
+            .map(|const_exp| match const_exp.parse() {
+                IRObj::Const(c) => c as u32,
+                _ => unreachable!("ConstExp must parse to Const"),
+            })
+            .collect::<Vec<u32>>();
+
+        let old_typ = get_cur_type();
+        let typ = eval_typ(get_cur_decl_type(), &indexes, 0);
+        emit_cur_type(typ.clone());
+
         if !self.const_exps.is_empty() {
             *self.init_val.borrow_mut() = Some(self.fill_array());
         }
+
+        let old_const_only = is_const_only();
+        set_const_only(true);
 
         let mut parse_result = match self.init_val.borrow().as_ref() {
             Some(init_val) => init_val.parse(),
             None => IRObj::Const(0),
         };
+
+        set_const_only(old_const_only);
 
         let global_const_to_var = fix(|f, obj: &IRObj| -> IRObj {
             match obj {
@@ -493,14 +528,19 @@ impl Declaration for VarDef {
             }
         });
 
+        emit_cur_type(old_typ);
+
         match &mut parse_result {
             IRObj::Const(c) => IRObj::GlobalVar {
                 initialized: self.init_val.borrow().is_some(),
                 global_var_id: self.ident.clone(),
                 init_val: *c,
             },
-            IRObj::Array { ident, .. } => {
+            IRObj::Array { ident, typ, .. } => {
                 *ident = self.ident.clone();
+                *typ = BType::Pointer {
+                    typ: Box::new(typ.clone()),
+                };
                 global_const_to_var(&parse_result)
             }
             _ => unreachable!(
@@ -531,16 +571,22 @@ impl Declaration for InitVal {
     fn parse(&self) -> IRObj {
         match self {
             InitVal::Exp(exp) => {
+                if is_const_only() {
+                    return exp.parse_const_exp();
+                }
+
                 let parse_result = exp.parse_var_exp();
                 // we don't need to store temp var to var_table here for it'll be removed soon after STORE
-                if let IRObj::Const(_) | IRObj::IRVar(_) | IRObj::ReturnVal { .. } = parse_result {
+                if let IRObj::Const(_) | IRObj::IRVar { .. } | IRObj::ReturnVal { .. } =
+                    parse_result
+                {
                     insert_ir(InstData::new(
                         BType::Void,
                         IRObj::None,
                         KoopaOpCode::STORE,
                         vec![
                             match parse_result {
-                                IRObj::IRVar(_) | IRObj::Const(_) | IRObj::ReturnVal { .. } => {
+                                IRObj::IRVar { .. } | IRObj::Const(_) | IRObj::ReturnVal { .. } => {
                                     parse_result.clone()
                                 }
                                 _ => unreachable!(),
@@ -558,27 +604,31 @@ impl Declaration for InitVal {
                     .iter()
                     .enumerate()
                     .map(|(idx, init_val)| {
-                        let ir_obj = IRObj::IRVar((
-                            IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                            SC_CONTEXT_STACK.with(|stack| {
-                                stack.borrow().get_current_dfg().borrow().get_next_inst_id()
-                            }),
-                        ));
-                        let old_obj = get_cur_obj();
+                        if is_const_only() {
+                            return init_val.parse();
+                        }
+
                         let old_typ = get_cur_type();
+                        let typ = match old_typ.clone() {
+                            BType::Array { typ, .. } => typ.clone(),
+                            _ => {
+                                unreachable!(
+                                    "Array init val must have array type in decl context: {:#?}",
+                                    old_typ
+                                );
+                            }
+                        };
+                        let wrapped_typ = BType::Pointer {
+                            typ: Box::new(*typ.clone()),
+                        };
+
+                        let ir_obj = IRObj::new_ir_var(wrapped_typ.clone());
+                        let old_obj = get_cur_obj();
 
                         insert_ir(InstData::new(
                             {
-                                let typ = match old_typ.clone() {
-                                    BType::Array { typ, .. } => BType::Pointer {
-                                        typ: Box::new(*typ),
-                                    },
-                                    _ => unreachable!(
-                                        "Array init val must have array type in decl context"
-                                    ),
-                                };
-                                emit_cur_type(typ.clone());
-                                typ
+                                emit_cur_type(*typ.clone());
+                                wrapped_typ.clone()
                             },
                             ir_obj.clone(),
                             KoopaOpCode::GETELEMPTR,
@@ -633,69 +683,70 @@ pub trait FillArray<T: Clone + IntoIterator> {
         let new_vals = RefCell::new(vec![]);
 
         // flatten origin array
-        let rec = fix(|f, vals: T| -> (u32, u32) {
-            let vals = self.unwrap_array(&vals);
+        let rec = fix(|f, params: (T, u32)| -> u32 {
+            let (val, depth) = params;
             let mut filled_size: u32 = 0;
 
             // find minimal depth of current array.
-            let depth = vals.iter().fold(indexes.len() as u32, |acc, val| {
-                if self.is_array(val) {
-                    if new_vals.borrow().len() as u32 % indexes[vals.len() - 1] != 0 {
-                        panic!("Array has insufficient initializers");
-                    }
-
-                    let (sub_depth, sub_filled_size) = f(val.clone());
-                    let cur_depth = min(acc, sub_depth - 1);
-                    filled_size += sub_filled_size;
-                    let to_be_filled = indexes[cur_depth as usize] as u32 - filled_size;
-
-                    // fill 0
-                    [0..=(to_be_filled)].iter().for_each(|_| {
-                        new_vals.borrow_mut().push(self.get_zero_place_holder());
-                    });
-
-                    filled_size += to_be_filled;
-                    cur_depth
-                } else if self.is_exp(val) {
-                    new_vals.borrow_mut().push(val.clone());
-                    filled_size += 1;
-                    acc
-                } else if self.is_zero_place_holder(val) {
-                    new_vals.borrow_mut().push(self.get_zero_place_holder());
-                    filled_size += 1;
-                    acc
-                } else {
-                    unreachable!("Array must contain only Array, Exp or ZeroPlaceHolder")
+            if self.is_array(&val) {
+                if new_vals.borrow().len() as u32 % indexes.last().unwrap() != 0 {
+                    panic!("Array has insufficient initializers");
                 }
-            });
 
-            (depth, filled_size)
+                let vals = self.unwrap_array(&val);
+                let sub_filled_size = vals.iter().fold(filled_size, |filled_size, val| {
+                    filled_size + f((val.clone(), depth + 1))
+                });
+
+                filled_size += sub_filled_size;
+
+                let to_be_filled = indexes[depth as usize..indexes.len()]
+                    .iter()
+                    .fold(1, |acc, index| acc * (*index as usize))
+                    as u32
+                    - filled_size;
+
+                // fill 0
+                (0..to_be_filled).for_each(|_| {
+                    new_vals.borrow_mut().push(self.get_zero_place_holder());
+                });
+
+                filled_size += to_be_filled;
+            } else if self.is_exp(&val) {
+                new_vals.borrow_mut().push(val.clone());
+                filled_size += 1;
+            } else if self.is_zero_place_holder(&val) {
+                new_vals.borrow_mut().push(self.get_zero_place_holder());
+                filled_size += 1;
+            } else {
+                unreachable!("Array must contain only Array, Exp or ZeroPlaceHolder")
+            };
+
+            filled_size
         });
 
-        let filled_size = rec(self.get_vals()).1;
-        if filled_size != new_vals.borrow().len() as u32
-            || filled_size != *indexes.last().unwrap_or(&0)
-        {
-            panic!("Array has insufficient initializers");
+        rec((self.get_vals(), 0));
+        let expected_size = indexes.iter().fold(1, |acc, index| acc * (*index as usize));
+        if new_vals.borrow().len() != expected_size {
+            panic!(
+                "Array has insufficient initializers: expected {}, found {}",
+                expected_size,
+                new_vals.borrow().len()
+            );
         }
 
-        self.wrap_array(indexes.iter().rev().fold(
-            new_vals.clone().borrow().clone(),
-            |mut acc, &size| {
-                for idx in 0..new_vals.borrow().len() {
-                    if idx as u32 % size == 0 {
-                        let range = (idx / size as usize)..size as usize;
-                        let to_be_drained =
-                                // do not drain here, just clone
-                                self.wrap_array(acc[range.clone()].to_vec());
-
-                        acc.splice(range, std::iter::once(to_be_drained));
-                    }
-                }
+        indexes
+            .iter()
+            .rev()
+            .fold(new_vals.clone().borrow().clone(), |mut acc, &size| {
+                acc = acc
+                    .chunks(size as usize)
+                    .map(|chunk| self.wrap_array(chunk.to_vec()))
+                    .collect::<Vec<T>>();
 
                 acc
-            },
-        ))
+            })
+            .remove(0)
     }
 }
 
@@ -706,6 +757,8 @@ pub struct DeclContext {
     pub cur_type: BType,
     // current decl type
     pub cur_decl: Option<Decl>,
+    // const only
+    pub const_only: bool,
 }
 
 impl DeclContext {
@@ -714,6 +767,7 @@ impl DeclContext {
             cur_obj: IRObj::None,
             cur_type: BType::Unknown,
             cur_decl: None,
+            const_only: false,
         }
     }
 
@@ -739,6 +793,14 @@ impl DeclContext {
 
     pub fn get_cur_type(&self) -> BType {
         self.cur_type.clone()
+    }
+
+    pub fn set_const_only(&mut self, const_only: bool) {
+        self.const_only = const_only;
+    }
+
+    pub fn is_const_only(&self) -> bool {
+        self.const_only
     }
 }
 
@@ -770,6 +832,14 @@ pub fn get_cur_decl() -> Decl {
     DECL_CONTEXT
         .with(|cxt| cxt.borrow().get_cur_decl())
         .expect("No current declaration in context")
+}
+
+pub fn set_const_only(const_only: bool) {
+    DECL_CONTEXT.with(|cxt| cxt.borrow_mut().set_const_only(const_only));
+}
+
+pub fn is_const_only() -> bool {
+    DECL_CONTEXT.with(|cxt| cxt.borrow().is_const_only())
 }
 
 pub fn get_cur_decl_type() -> BType {

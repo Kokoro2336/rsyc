@@ -188,10 +188,8 @@ impl ScContextStack {
 
     pub fn set_sc_var_initialized(&mut self, name: &str) {
         for context in self.sym_cxt_stack.iter_mut().rev() {
-            if let Some(IRObj::ScVar {
-                initialized,
-                sc_var_id: _,
-            }) = context.global_sc_var_table.get_mut(name)
+            if let Some(IRObj::ScVar { initialized, .. }) =
+                context.global_sc_var_table.get_mut(name)
             {
                 *initialized = true;
                 return;
@@ -410,11 +408,9 @@ impl ReturnTypes {
                 ReturnVal::AlwaysZero
             } else if return_vals.iter().all(|val| match val {
                 IRObj::Const(i) => *i != 0,
-                IRObj::ReturnVal {
-                    ir_var_id: _,
-                    inst_id: _,
-                    return_val,
-                } => matches!(return_val, ReturnVal::AlwaysNonZero),
+                IRObj::ReturnVal { return_val, .. } => {
+                    matches!(return_val, ReturnVal::AlwaysNonZero)
+                }
                 _ => false,
             }) {
                 ReturnVal::AlwaysNonZero

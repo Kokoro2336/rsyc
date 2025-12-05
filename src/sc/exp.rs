@@ -1,7 +1,9 @@
+use std::ops::Deref;
+
 use crate::global::config::BType;
 use crate::global::context::SC_CONTEXT_STACK;
 use crate::ir::config::{KoopaOpCode, IR_VAR_ID_ALLOCATOR};
-use crate::ir::koopa::{insert_ir, parse_arr_item, IRObj, InstData};
+use crate::ir::koopa::{insert_ir, load_item, IRObj, InstData};
 use crate::sc::ast::{LVal, ReturnVal};
 use crate::sc::op::*;
 
@@ -117,13 +119,8 @@ impl Expression for LOrExp {
                 }
 
                 let converted_left = match &left {
-                    IRObj::ReturnVal { .. } | IRObj::IRVar(_) => {
-                        let ir_obj = IRObj::IRVar((
-                            IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                            SC_CONTEXT_STACK.with(|stack| {
-                                stack.borrow().get_current_dfg().borrow().get_next_inst_id()
-                            }),
-                        ));
+                    IRObj::ReturnVal { .. } | IRObj::IRVar { .. } => {
+                        let ir_obj = IRObj::new_ir_var(BType::Int);
                         insert_ir(InstData::new(
                             BType::Int,
                             ir_obj.clone(),
@@ -136,13 +133,8 @@ impl Expression for LOrExp {
                 };
 
                 let converted_right = match &right {
-                    IRObj::ReturnVal { .. } | IRObj::IRVar(_) => {
-                        let ir_obj = IRObj::IRVar((
-                            IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                            SC_CONTEXT_STACK.with(|stack| {
-                                stack.borrow().get_current_dfg().borrow().get_next_inst_id()
-                            }),
-                        ));
+                    IRObj::ReturnVal { .. } | IRObj::IRVar { .. } => {
+                        let ir_obj = IRObj::new_ir_var(BType::Int);
                         insert_ir(InstData::new(
                             BType::Int,
                             ir_obj.clone(),
@@ -158,11 +150,7 @@ impl Expression for LOrExp {
                     LOrOp::Or => KoopaOpCode::OR,
                 };
 
-                let ir_obj = IRObj::IRVar((
-                    IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                    SC_CONTEXT_STACK
-                        .with(|stack| stack.borrow().get_current_dfg().borrow().get_next_inst_id()),
-                ));
+                let ir_obj = IRObj::new_ir_var(BType::Int);
                 insert_ir(InstData::new(
                     BType::Int,
                     ir_obj.clone(),
@@ -240,7 +228,11 @@ impl Expression for LOrExp {
                     });
                 }
 
-                IRObj::IRVar((0, 0))
+                IRObj::IRVar {
+                    typ: BType::Int,
+                    ir_var_id: 0,
+                    inst_id: 0,
+                }
             }
         }
     }
@@ -327,13 +319,8 @@ impl Expression for LAndExp {
                 };
 
                 let converted_left = match &left {
-                    IRObj::ReturnVal { .. } | IRObj::IRVar(_) => {
-                        let ir_obj = IRObj::IRVar((
-                            IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                            SC_CONTEXT_STACK.with(|stack| {
-                                stack.borrow().get_current_dfg().borrow().get_next_inst_id()
-                            }),
-                        ));
+                    IRObj::ReturnVal { .. } | IRObj::IRVar { .. } => {
+                        let ir_obj = IRObj::new_ir_var(BType::Int);
                         insert_ir(InstData::new(
                             BType::Int,
                             ir_obj.clone(),
@@ -346,13 +333,8 @@ impl Expression for LAndExp {
                 };
 
                 let converted_right = match &right {
-                    IRObj::ReturnVal { .. } | IRObj::IRVar(_) => {
-                        let ir_obj = IRObj::IRVar((
-                            IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                            SC_CONTEXT_STACK.with(|stack| {
-                                stack.borrow().get_current_dfg().borrow().get_next_inst_id()
-                            }),
-                        ));
+                    IRObj::ReturnVal { .. } | IRObj::IRVar { .. } => {
+                        let ir_obj = IRObj::new_ir_var(BType::Int);
                         insert_ir(InstData::new(
                             BType::Int,
                             ir_obj.clone(),
@@ -364,11 +346,7 @@ impl Expression for LAndExp {
                     _ => right,
                 };
 
-                let ir_obj = IRObj::IRVar((
-                    IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                    SC_CONTEXT_STACK
-                        .with(|stack| stack.borrow().get_current_dfg().borrow().get_next_inst_id()),
-                ));
+                let ir_obj = IRObj::new_ir_var(BType::Int);
                 insert_ir(InstData::new(
                     BType::Int,
                     ir_obj.clone(),
@@ -431,7 +409,11 @@ impl Expression for LAndExp {
                     return IRObj::Const(if l != 0 && r != 0 { 1 } else { 0 });
                 }
 
-                IRObj::IRVar((0, 0))
+                IRObj::IRVar {
+                    typ: BType::Int,
+                    ir_var_id: 0,
+                    inst_id: 0,
+                }
             }
         }
     }
@@ -482,11 +464,7 @@ impl Expression for EqExp {
                     EqOp::Ne => KoopaOpCode::NE,
                 };
 
-                let ir_obj = IRObj::IRVar((
-                    IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                    SC_CONTEXT_STACK
-                        .with(|stack| stack.borrow().get_current_dfg().borrow().get_next_inst_id()),
-                ));
+                let ir_obj = IRObj::new_ir_var(BType::Int);
                 insert_ir(InstData::new(
                     BType::Int,
                     ir_obj.clone(),
@@ -546,7 +524,11 @@ impl Expression for EqExp {
                         };
                         IRObj::Const(if res { 1 } else { 0 })
                     }
-                    _ => IRObj::IRVar((0, 0)),
+                    _ => IRObj::IRVar {
+                        typ: BType::Int,
+                        ir_var_id: 0,
+                        inst_id: 0,
+                    },
                 }
             }
         }
@@ -602,11 +584,7 @@ impl Expression for RelExp {
                     RelOp::Ge => KoopaOpCode::GE,
                 };
 
-                let ir_obj = IRObj::IRVar((
-                    IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                    SC_CONTEXT_STACK
-                        .with(|stack| stack.borrow().get_current_dfg().borrow().get_next_inst_id()),
-                ));
+                let ir_obj = IRObj::new_ir_var(BType::Int);
                 insert_ir(InstData::new(
                     BType::Int,
                     ir_obj.clone(),
@@ -670,7 +648,11 @@ impl Expression for RelExp {
                         };
                         IRObj::Const(if res { 1 } else { 0 })
                     }
-                    _ => IRObj::IRVar((0, 0)),
+                    _ => IRObj::IRVar {
+                        typ: BType::Int,
+                        ir_var_id: 0,
+                        inst_id: 0,
+                    },
                 }
             }
         }
@@ -711,21 +693,27 @@ impl Expression for UnaryExp {
                     );
                 }
 
-                if params
-                    .iter()
-                    .any(|param| !matches!(param.param_type, BType::Int))
-                {
-                    panic!("Argument type mismatch occurred");
-                }
-
                 let ir_args = args
                     .iter()
                     .map(|arg| arg.parse_var_exp())
                     .collect::<Vec<IRObj>>();
 
+                if params.iter().enumerate().any(|(idx, param)| {
+                    let arg = ir_args.get(idx).unwrap();
+                    let arg_typ = match arg {
+                        IRObj::Const(_) => BType::Int,
+                        IRObj::ReturnVal { typ, .. } | IRObj::IRVar { typ, .. } => typ.clone(),
+                        _ => panic!("Return value of parse_var_exp() counldn't be: {:#?}", arg),
+                    };
+                    !matches!(param.param_type.clone(), arg)
+                }) {
+                    panic!("Argument type mismatch occurred");
+                }
+
                 let ir_obj = match func_type {
                     BType::Void => IRObj::None,
                     _ => IRObj::ReturnVal {
+                        typ: func_type.clone(),
                         ir_var_id: IR_VAR_ID_ALLOCATOR
                             .with(|allocator| allocator.borrow_mut().alloc()),
                         inst_id: SC_CONTEXT_STACK.with(|stack| {
@@ -773,12 +761,7 @@ impl Expression for UnaryExp {
                 match unary_op {
                     UnaryOp::Plus => parse_result,
                     UnaryOp::Minus | UnaryOp::Not => {
-                        let ir_obj = IRObj::IRVar((
-                            IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                            SC_CONTEXT_STACK.with(|stack| {
-                                stack.borrow().get_current_dfg().borrow().get_next_inst_id()
-                            }),
-                        ));
+                        let ir_obj = IRObj::new_ir_var(BType::Int);
                         insert_ir(InstData::new(
                             BType::Int,
                             ir_obj.clone(),
@@ -831,7 +814,11 @@ impl Expression for UnaryExp {
         match self {
             UnaryExp::PrimaryExp { exp } => exp.evaluate(),
             // TODO: this one isn't very accurate
-            UnaryExp::FunctionCall { ident: _, args: _ } => IRObj::IRVar((0, 0)),
+            UnaryExp::FunctionCall { ident: _, args: _ } => IRObj::IRVar {
+                typ: BType::Int,
+                ir_var_id: 0,
+                inst_id: 0,
+            },
             UnaryExp::UnaryExp {
                 unary_op,
                 unary_exp,
@@ -843,7 +830,11 @@ impl Expression for UnaryExp {
                         UnaryOp::Minus => IRObj::Const(-v),
                         UnaryOp::Not => IRObj::Const(if v == 0 { 1 } else { 0 }),
                     },
-                    _ => IRObj::IRVar((0, 0)),
+                    _ => IRObj::IRVar {
+                        typ: BType::Int,
+                        ir_var_id: 0,
+                        inst_id: 0,
+                    },
                 }
             }
         }
@@ -897,11 +888,7 @@ impl Expression for MulExp {
                     MulOp::Mod => KoopaOpCode::MOD,
                 };
 
-                let ir_obj = IRObj::IRVar((
-                    IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                    SC_CONTEXT_STACK
-                        .with(|stack| stack.borrow().get_current_dfg().borrow().get_next_inst_id()),
-                ));
+                let ir_obj = IRObj::new_ir_var(BType::Int);
                 insert_ir(InstData::new(
                     BType::Int,
                     ir_obj.clone(),
@@ -962,7 +949,11 @@ impl Expression for MulExp {
                         };
                         IRObj::Const(res)
                     }
-                    _ => IRObj::IRVar((0, 0)),
+                    _ => IRObj::IRVar {
+                        typ: BType::Int,
+                        ir_var_id: 0,
+                        inst_id: 0,
+                    },
                 }
             }
         }
@@ -1016,11 +1007,7 @@ impl Expression for AddExp {
                     AddOp::Sub => KoopaOpCode::SUB,
                 };
 
-                let ir_obj = IRObj::IRVar((
-                    IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                    SC_CONTEXT_STACK
-                        .with(|stack| stack.borrow().get_current_dfg().borrow().get_next_inst_id()),
-                ));
+                let ir_obj = IRObj::new_ir_var(BType::Int);
                 insert_ir(InstData::new(
                     BType::Int,
                     ir_obj.clone(),
@@ -1079,7 +1066,11 @@ impl Expression for AddExp {
                         };
                         IRObj::Const(res)
                     }
-                    _ => IRObj::IRVar((0, 0)),
+                    _ => IRObj::IRVar {
+                        typ: BType::Int,
+                        ir_var_id: 0,
+                        inst_id: 0,
+                    },
                 }
             }
         }
@@ -1102,36 +1093,33 @@ impl Expression for PrimaryExp {
             PrimaryExp::LVal { l_val } => {
                 let result = SC_CONTEXT_STACK
                     .with(|stack| stack.borrow().find_highest_priority(&l_val.ident));
-                match result {
+                match result.as_ref() {
                     Some(IRObj::ScVar {
-                        initialized,
-                        sc_var_id,
+                        initialized, typ, ..
                     }) => {
                         // this case the variables wasn't loaded before use
                         if !initialized {
                             panic!("Variable {} used before initialization", l_val.ident);
                         }
 
-                        // if it's a variable stored in memory, load first and return inst_id.
-                        let ir_obj = IRObj::IRVar((
-                            IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                            SC_CONTEXT_STACK.with(|stack| {
-                                stack.borrow().get_current_dfg().borrow().get_next_inst_id()
-                            }),
-                        ));
+                        let typ = match typ {
+                            BType::Pointer { typ } => typ.deref().clone(),
+                            _ => panic!("Cannot load from non-pointer type: {:?}", typ),
+                        };
+
+                        let ir_obj = IRObj::new_ir_var(typ.clone());
                         insert_ir(InstData::new(
-                            BType::Int,
+                            typ.clone(),
                             ir_obj.clone(),
                             KoopaOpCode::LOAD,
-                            vec![IRObj::ScVar {
-                                initialized,
-                                sc_var_id,
-                            }],
+                            vec![result.unwrap()],
                         ));
-                        ir_obj
+
+                        // for pointer
+                        load_item(typ, &ir_obj, l_val.exps.as_ref())
                     }
 
-                    Some(IRObj::Const(value)) => IRObj::Const(value),
+                    Some(IRObj::Const(value)) => IRObj::Const(*value),
 
                     Some(IRObj::GlobalVar {
                         initialized,
@@ -1139,27 +1127,27 @@ impl Expression for PrimaryExp {
                         init_val,
                     }) => {
                         // globa var has been initialized before use
-                        let ir_obj = IRObj::IRVar((
-                            IR_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc()),
-                            SC_CONTEXT_STACK.with(|stack| {
-                                stack.borrow().get_current_dfg().borrow().get_next_inst_id()
-                            }),
-                        ));
+                        let ir_obj = IRObj::new_ir_var(BType::Int);
                         insert_ir(InstData::new(
                             BType::Int,
                             ir_obj.clone(),
                             KoopaOpCode::LOAD,
                             vec![IRObj::GlobalVar {
-                                initialized,
-                                global_var_id,
-                                init_val,
+                                initialized: *initialized,
+                                global_var_id: global_var_id.clone(),
+                                init_val: *init_val,
                             }],
                         ));
                         ir_obj
                     }
 
-                    Some(IRObj::Array { .. }) => {
-                        parse_arr_item(result.as_ref().unwrap(), l_val.exps.as_ref())
+                    Some(IRObj::Array { typ, .. }) => {
+                        // unwrap the pointer outside the original type.
+                        let typ = match typ {
+                            BType::Pointer { typ } => typ.deref().clone(),
+                            _ => panic!("Cannot load from non-pointer type: {:?}", typ),
+                        };
+                        load_item(typ.clone(), result.as_ref().unwrap(), l_val.exps.as_ref())
                     }
 
                     _ => {
@@ -1203,7 +1191,11 @@ impl Expression for PrimaryExp {
                 {
                     value
                 } else {
-                    IRObj::IRVar((0, 0))
+                    IRObj::IRVar {
+                        typ: BType::Int,
+                        ir_var_id: 0,
+                        inst_id: 0,
+                    }
                 }
             }
         }

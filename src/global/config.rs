@@ -34,3 +34,20 @@ impl std::fmt::Display for BType {
         }
     }
 }
+
+pub fn eval_typ(origin_typ: BType, indexes: &Vec<u32>, depth: usize) -> BType {
+    if depth >= indexes.len() {
+        return origin_typ.clone();
+    }
+
+    match origin_typ {
+        BType::Array { .. } => unreachable!(
+            "Cannot init array with array type directly, origin type must be base type"
+        ),
+        BType::Void => unreachable!("Cannot init array with void type"),
+        _ => BType::Array {
+            typ: Box::new(eval_typ(origin_typ, indexes, depth + 1)),
+            len: indexes[depth],
+        },
+    }
+}

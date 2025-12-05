@@ -79,19 +79,12 @@ impl StackFrameManager {
                     if let Some(IRObj::Args(args)) = &inst.operands.last() {
                         let total_size: u32 = args.iter().enumerate().fold(0, |acc, (idx, arg)| {
                             acc + if idx > (REG_PARAMS_MAX_NUM - 1) as usize {
-                                match *arg {
-                                    IRObj::IRVar((_, inst_id))
-                                    | IRObj::ReturnVal { inst_id, .. } => ASM_CONTEXT.with(|ctx| {
-                                        ctx.borrow()
-                                            .get_current_dfg()
-                                            .borrow()
-                                            .get_inst(&inst_id)
-                                            .expect("IR variable type not found in ASM context!")
-                                            .typ
-                                            .size_in_bytes()
-                                    }),
+                                match arg {
+                                    IRObj::IRVar { typ, .. }
+                                    | IRObj::ReturnVal { typ, .. }
+                                    | IRObj::ScVar { typ, .. } => typ.size_in_bytes(),
 
-                                    IRObj::ScVar { .. } | IRObj::Const(_) => 4,
+                                    IRObj::Const(_) => 4,
                                     _ => 0,
                                 }
                             } else {

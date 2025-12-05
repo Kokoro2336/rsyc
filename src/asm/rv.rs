@@ -589,9 +589,19 @@ impl AsmInst {
                 RVOperandType::None
             }
 
-            KoopaOpCode::GETELEMPTR => {
-                let typ = inst_data.typ.clone();
-                let rs1 = process_op(&IRObj::Const(typ.size_in_bytes() as i32));
+            KoopaOpCode::GETELEMPTR
+            | KoopaOpCode::GETPTR => {
+                let origin_typ = match &inst_data.operands.first().unwrap() {
+                    IRObj::Array { typ, .. }
+                    | IRObj::ScVar { typ, .. }
+                    | IRObj::IRVar { typ, .. } => match typ {
+                        BType::Array { typ: inner_typ, .. } => *inner_typ.clone(),
+                        BType::Pointer { typ: inner_typ } => *inner_typ.clone(),
+                        _ => unreachable!("Cannot get element pointer from non-array/pointer type"),
+                    },
+                    _ => unreachable!("Cannot get element pointer from non-array/pointer type"),
+                };
+                let rs1 = process_op(&IRObj::Const(origin_typ.size_in_bytes() as i32));
                 let rs2 = process_op(inst_data.operands.get(1).unwrap());
 
                 let rd1 = RVREG_ALLOCATOR.with(|allocator| allocator.borrow_mut().find_and_occupy_temp_reg(*inst));
@@ -643,11 +653,6 @@ impl AsmInst {
                 rd3.free_temp();
 
                 RVOperandType::None
-            }
-
-            // TODO
-            KoopaOpCode::GETPTR => {
-                unimplemented!()
             }
 
             KoopaOpCode::STORE => {
@@ -930,8 +935,8 @@ fn process_op(
             }
         }
 
-        IRObj::IRVar((_, inst_id))
-        | IRObj::ReturnVal { ir_var_id: _, inst_id, return_val: _ } => {
+        IRObj::IRVar {inst_id, ..}
+        | IRObj::ReturnVal { inst_id, .. } => {
             let mem_with_reg = STK_FRM_MANAGER.with(|manager| manager.borrow().get_l_val_wrapped(operand.to_string()));
             let rs1 = match inst_data.opcode {
                 KoopaOpCode::RET => RVOperandType::Temp(RVRegCode::A0), // for return, we must use a0

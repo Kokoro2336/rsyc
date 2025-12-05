@@ -50,7 +50,7 @@ pub trait ConditionStatement {
     fn parse_single_condition(&self) {
         let result = self.condition().parse_var_exp();
         match result {
-            IRObj::IRVar(_) => {
+            IRObj::IRVar { .. } => {
                 let br_id = insert_ir(InstData::new(
                     BType::Void,
                     IRObj::None,
@@ -165,13 +165,13 @@ pub trait ConditionStatement {
     fn parse_paired_condition(&self) {
         let result = self.condition().parse_var_exp();
         match result {
-            IRObj::IRVar(inst_id) => {
+            IRObj::IRVar { .. } => {
                 let br_id = insert_ir(InstData::new(
                     BType::Void,
                     IRObj::None,
                     KoopaOpCode::BR,
                     vec![
-                        IRObj::IRVar(inst_id),
+                        result,
                         // we would add label(block id) here later
                     ],
                 ));
@@ -385,12 +385,12 @@ pub trait WhileStatement {
 
         // parse as usual
         let result = self.condition().parse_var_exp();
-        let entry_end_inst = match result {
-            IRObj::IRVar(inst_id) => insert_ir(InstData::new(
+        let entry_end_inst = match &result {
+            IRObj::IRVar { .. } => insert_ir(InstData::new(
                 BType::Void,
                 IRObj::None,
                 KoopaOpCode::BR,
-                vec![IRObj::IRVar(inst_id)],
+                vec![result.clone()],
             )),
             IRObj::Const(_) => insert_ir(InstData::new(
                 BType::Void,
@@ -413,7 +413,7 @@ pub trait WhileStatement {
 
         // parse the body
         match result {
-            IRObj::IRVar(_) => {
+            IRObj::IRVar { .. } => {
                 self.body_stmt().parse();
                 let jump_to_entry = insert_ir(InstData::new(
                     BType::Void,
@@ -920,7 +920,9 @@ impl Statement for SimpleStmt {
                     match result {
                         IRObj::None => vec![],
                         _ => vec![match result {
-                            IRObj::IRVar(_) | IRObj::Const(_) | IRObj::ReturnVal { .. } => result,
+                            IRObj::IRVar { .. } | IRObj::Const(_) | IRObj::ReturnVal { .. } => {
+                                result
+                            }
                             _ => unreachable!("{:#?} is unreachable in return statement", result),
                         }],
                     },
@@ -935,7 +937,7 @@ impl Statement for SimpleStmt {
                 exp.as_ref().map(|exp| {
                     let result = exp.evaluate();
                     match result {
-                        IRObj::IRVar(_) => {
+                        IRObj::IRVar { .. } => {
                             RETURN_TYPES.with(|ret_types| {
                                 ret_types.borrow_mut().add_return_val(result);
                             });

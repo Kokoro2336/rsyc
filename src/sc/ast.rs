@@ -1,8 +1,8 @@
-use crate::global::config::BType;
+use crate::global::config::{eval_typ, BType};
 use crate::global::context::{RETURN_TYPES, SC_CONTEXT_STACK};
 use crate::ir::config::{KoopaOpCode, SC_VAR_ID_ALLOCATOR};
 use crate::ir::koopa::{insert_ir, BasicBlock, BasicBlockType, Func, IRObj, InstData, Program};
-use crate::sc::decl::{Decl, ConstExp};
+use crate::sc::decl::{ConstExp, Decl};
 use crate::sc::exp::{Exp, Expression};
 use crate::sc::stmt::{Statement, Stmt};
 
@@ -76,15 +76,6 @@ impl CompUnit {
             *func_def.return_val.borrow_mut() =
                 Some(RETURN_TYPES.with(|ret_types| ret_types.borrow_mut().analyze_return_type()));
         });
-
-        println!(
-            "{:#?}",
-            &self
-                .func_defs
-                .iter()
-                .map(|f| (&f.ident, f.return_val.borrow().clone()))
-                .collect::<Vec<(&String, Option<ReturnVal>)>>()
-        );
 
         if !self
             .func_defs
@@ -170,16 +161,22 @@ impl FuncDef {
     fn init_func_param(&self) {
         self.params.iter().enumerate().for_each(|(index, param)| {
             let sc_var_id = SC_VAR_ID_ALLOCATOR.with(|allocator| allocator.borrow_mut().alloc());
+            let typ = param.eval_typ();
             let sc_var = IRObj::ScVar {
+                typ: BType::Pointer {
+                    typ: Box::new(typ.clone()),
+                },
                 initialized: true,
                 sc_var_id,
             };
 
             insert_ir(InstData::new(
-                BType::Int,
+                BType::Pointer {
+                    typ: Box::new(typ.clone()),
+                },
                 sc_var.clone(),
                 KoopaOpCode::ALLOC,
-                vec![IRObj::BType(BType::Int)],
+                vec![IRObj::BType(typ.clone())],
             ));
 
             insert_ir(InstData::new(
@@ -188,7 +185,8 @@ impl FuncDef {
                 KoopaOpCode::STORE,
                 vec![
                     IRObj::Param {
-                        param_type: param.param_type.clone(),
+                        // original type shouldn't be wrapped by pointer
+                        param_type: typ.clone(),
                         idx: index as u32,
                         ident: param.ident.clone(),
                     },
@@ -222,6 +220,37 @@ impl std::fmt::Display for FuncFParam {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} {}", self.param_type, self.ident);
         Ok(())
+    }
+}
+
+impl FuncFParam {
+    pub fn eval_typ(&self) -> BType {
+        if self.const_exps.is_empty() {
+            return self.param_type.clone();
+        }
+
+        if !self.const_exps.first().unwrap().is_none() {
+            panic!("The first dimensions of an array parameter must be empty.");
+        }
+
+        BType::Pointer {
+            typ: Box::new(eval_typ(
+                self.param_type.clone(),
+                self.const_exps
+                    .iter()
+                    .skip(1)
+                    .map(|exp| match exp {
+                        Some(const_exp) => match const_exp.exp.parse_const_exp() {
+                            IRObj::Const(c) => c as u32,
+                            _ => unreachable!("ConstExp must evaluate to a constant."),
+                        },
+                        None => panic!("Non-first dimensions must have an initial value."),
+                    })
+                    .collect::<Vec<u32>>()
+                    .as_ref(),
+                0,
+            )),
+        }
     }
 }
 

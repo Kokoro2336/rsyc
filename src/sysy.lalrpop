@@ -169,6 +169,7 @@ ConstDef: ConstDef = {
 
 ConstInitVal: ConstInitVal = {
   <const_exp: ConstExp> => ConstInitVal::ConstExp(const_exp),
+  "{" "}" => ConstInitVal::ConstArrayExp(vec![]),
   "{" <first_init_val: ConstInitVal> <other_init_vals: ("," ConstInitVal)*> "}" => {
     let mut init_vals = vec![first_init_val];
     for (_, val) in other_init_vals {
@@ -207,6 +208,7 @@ VarDef: VarDef = {
 
 InitVal: InitVal = {
   <exp: Exp> => InitVal::Exp(Box::new(exp)),
+  "{" "}" => InitVal::ArrayExp(vec![]),
   "{" <first_init_val: InitVal> <other_init_vals: ("," InitVal)*> "}" => {
     let mut init_vals = vec![first_init_val];
     for (_, val) in other_init_vals {
