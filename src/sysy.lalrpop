@@ -1,6 +1,5 @@
-use crate::sc::{ast::*, decl::*, exp::*, stmt::*, op::*};
-use crate::global::config::BType;
-use std::cell::RefCell;
+use crate::global::config::Type;
+use crate::frontend::ast::*;
 
 // lalrpop 里的约定
 grammar;
@@ -17,44 +16,60 @@ match {
 
 // 定义 CompUnit, 其返回值类型为 String
 // parser 在解析完成后的行为是返回 FuncDef 的值
-pub CompUnit: CompUnit = {
+pub CompUnit: Box<dyn Node> = {
   <global_objs: (GlobalObj)*> => {
-    let mut comp_unit = CompUnit { global_decls: vec![], func_defs: vec![] };
-    global_objs.iter().for_each(|obj| comp_unit.push_obj(obj.clone()));
-    comp_unit
+    Box::new(
+      CompUnit {
+        nodes: global_objs.into_iter().collect(),
+      }
+    )
   }
 };
 
-GlobalObj: GlobalObj = {
-  <func_def: FuncDef> => GlobalObj::FuncDef(func_def),
-  <global_decl: Decl> => GlobalObj::GlobalDecl(global_decl),
+GlobalObj: Box<dyn Node> = {
+  <func_def: FuncDef> => Box::new(func_def),
+  <global_decl: Decl> => Box::new(global_decl),
 };
 
 // 同上, 不解释
-FuncDef: FuncDef = {
-  <func_type: BType> <ident: Ident> "(" <func_fparams: FuncFParams> ")" <block: Block> => {
+FuncDef: Function = {
+  <b_type: BType> <ident: Ident> "(" <func_fparams: FuncFParams> ")" <block: Block> => {
     // construct FuncDef struct, using shorthand <> to pass all named fields
-    FuncDef { 
-      func_type,
-      ident,
+    Function { 
+      name: ident,
       params: func_fparams,
-      block,
-      return_val: RefCell::new(None),
+      body: block,
+      return_type: b_type,
     }
   },
   // case with no parameters
-  <func_type: BType> <ident: Ident> "(" ")" <block: Block> => {
-    FuncDef { 
-      func_type,
-      ident,
+  <b_type: BType> <ident: Ident> "(" ")" <block: Block> => {
+    Function { 
+      name: ident,
       params: vec![],
-      block,
-      return_val: RefCell::new(None),
+      body: block,
+      return_type: b_type,
+     }
+  },
+  "void" <ident: Ident> "(" <func_fparams: FuncFParams> ")" <block: Block> => {
+    Function { 
+      name: ident,
+      params: func_fparams,
+      body: block,
+      return_type: Type::Void,
+    }
+  },
+  "void" <ident: Ident> "(" ")" <block: Block> => {
+    Function { 
+      name: ident,
+      params: vec![],
+      body: block,
+      return_type: Type::Void,
      }
   },
 };
 
-FuncFParams: Vec<FuncFParam> = {
+FuncFParams: Vec<(String, Type)> = {
   <first_param: FuncFParam> <other_params: ("," FuncFParam)*> => {
     let mut param_list = vec![first_param];
     for (_, other_param) in other_params {
@@ -64,285 +79,336 @@ FuncFParams: Vec<FuncFParam> = {
   }
 };
 
-FuncFParam: FuncFParam = {
-  <param_type: BType> <ident: Ident> => FuncFParam { param_type, ident, const_exps: vec![] },
-  <param_type: BType> <ident: Ident> <first_const_exp: ("[" "]")> <other_const_exps: ("[" ConstExp "]")*> => FuncFParam { 
-    param_type, 
-    ident,
-    const_exps: {
-      let mut exps = vec![None];
-      for (_, exp, _) in other_const_exps {
-        exps.push(Some(exp));
-      }
-      exps
-    }
+FuncFParam: (String, Type) = {
+  <param_type: BType> <ident: Ident> => (ident, param_type),
+  <param_type: BType> <ident: Ident> <first_const_exp: ("[" "]")> <other_const_exps: ("[" ConstExp "]")*> => {
+    let arr_type = Type::Pointer {
+      base: Box::new(Type::Array {
+        base: Box::new(param_type),
+        dims: other_const_exps.into_iter().map(|(_, exp, _)| exp).collect::<Vec<ConstExp>>(),
+      }),
+    };
+    (ident, arr_type)
   }
 };
 
-BType: BType = {
-  "int" => BType::Int,
-  "void" => BType::Void,
+FuncType: Type = {
+  "void" => Type::Void,
+  <b_type: BType> => b_type,
 };
 
-Block: Block = "{" <block_items: (BlockItem)*> "}" => Block { block_items };
-
-BlockItem: BlockItem = {
-  <stmt: Stmt> => BlockItem::Stmt { stmt },
-  <decl: Decl> => BlockItem::Decl { decl },
+BType: Type = {
+  "int" => Type::Int,
+  "float" => Type::Float,
 };
 
-Stmt: Stmt = {
-  <open_stmt: OpenStmt> => Stmt::OpenStmt { open_stmt: Box::new(open_stmt) },
-  <close_stmt: CloseStmt> => Stmt::CloseStmt { close_stmt: Box::new(close_stmt) },
+Block: Box<dyn Node> = "{" <block_items: (BlockItem)*> "}" => Box::new(Block { statements: block_items.into_iter().collect() });
+
+BlockItem: Box<dyn Node> = {
+  <stmt: Stmt> => stmt,
+  <decl: Decl> => Box::new(decl),
+};
+
+Stmt: Box<dyn Node> = {
+  <open_stmt: OpenStmt> => open_stmt,
+  <close_stmt: CloseStmt> => close_stmt,
 }
 
-CloseStmt: CloseStmt = {
-  <simple_stmt: SimpleStmt> => CloseStmt::SimpleStmt { simple_stmt },
-  "if" "(" <condition: Exp> ")" <then_stmt: CloseStmt> "else" <else_stmt: CloseStmt> => CloseStmt::CloseCond {
-      condition,
-      then_stmt: Box::new(then_stmt),
-      else_stmt: Box::new(else_stmt),
-  },
-  "while" "(" <condition: Exp> ")" <body_stmt: CloseStmt> => CloseStmt::CloseWhile {
-      condition,
-      body_stmt: Box::new(body_stmt),
-  },
+CloseStmt: Box<dyn Node> = {
+  <simple_stmt: SimpleStmt> => simple_stmt,
+  "if" "(" <condition: Exp> ")" <then_stmt: CloseStmt> "else" <else_stmt: CloseStmt> => Box::new(If {
+      condition: Box::new(condition),
+      then_block: then_stmt,
+      else_block: Some(else_stmt),
+  }),
+  "while" "(" <condition: Exp> ")" <body_stmt: CloseStmt> => Box::new(While {
+      condition: Box::new(condition),
+      body: body_stmt,
+  }),
 };
 
-OpenStmt: OpenStmt = {
-  "if" "(" <condition: Exp> ")" <then_stmt: CloseStmt> "else" <else_stmt: OpenStmt> => OpenStmt::OpenCond {
-      condition,
-      then_stmt: Box::new(then_stmt),
-      else_stmt: Box::new(else_stmt),
-  },
-  "if" "(" <condition: Exp> ")" <then_stmt: Stmt> => OpenStmt::SingleCond {
-      condition,
-      then_stmt: Box::new(then_stmt),
-  },
-  "while" "(" <condition: Exp> ")" <body_stmt: OpenStmt> => OpenStmt::OpenWhile {
-      condition,
-      body_stmt: Box::new(body_stmt),
-  },
+OpenStmt: Box<dyn Node> = {
+  "if" "(" <condition: Exp> ")" <then_stmt: CloseStmt> "else" <else_stmt: OpenStmt> => Box::new(If {
+      condition: Box::new(condition),
+      then_block: then_stmt,
+      else_block: Some(else_stmt),
+  }),
+  "if" "(" <condition: Exp> ")" <then_stmt: Stmt> => Box::new(If {
+      condition: Box::new(condition),
+      then_block: then_stmt,
+      else_block: None,
+  }),
+  "while" "(" <condition: Exp> ")" <body_stmt: OpenStmt> => Box::new(While {
+      condition: Box::new(condition),
+      body: body_stmt,
+  }),
 };
 
-SimpleStmt: SimpleStmt = {
-  <l_val: LVal> "=" <exp: Exp> ";" => SimpleStmt::RegularStmt { l_val, exp },
-  <block: Block> => SimpleStmt::Block { block: Box::new(block) },
+SimpleStmt: Box<dyn Node> = {
+  <l_val: LVal> "=" <exp: Exp> ";" => Box::new(Assign { lval: Box::new(l_val), rval: Box::new(exp) }),
+  <block: Block> => block,
   // return statement should have higher priority that RawExp.
-  "return" <exp: Exp> ";" => SimpleStmt::ReturnStmt { exp: Some(exp) },
-  "return" ";" => SimpleStmt::ReturnStmt { exp: None },
-  "break" ";" => SimpleStmt::Break,
-  "continue" ";" => SimpleStmt::Continue,
-  <exp: Exp> ";" => SimpleStmt::RawExp { exp: Some(exp) },
-  ";" => SimpleStmt::RawExp { exp: None },
+  "return" <exp: Exp> ";" => Box::new(Return(Some(Box::new(exp)))),
+  "return" ";" => Box::new(Return(None)),
+  "break" ";" => Box::new(Break()),
+  "continue" ";" => Box::new(Continue()),
+  <exp: Exp> ";" => Box::new(exp),
+  ";" => Box::new(Empty()),
 };
 
-LVal: LVal = {
-  <ident: Ident> <exps: ("[" Exp "]")*> => LVal { 
-    ident, 
-    exps: exps.into_iter().map(|(_, exp, _)| exp).collect(),
+LVal: Box<dyn Node> = {
+  <ident: Ident> <exps: ("[" Exp "]")*> => {
+    if exps.is_empty() {
+      Box::new(VarAccess {
+        name: ident
+      })
+    } else {
+      Box::new(ArrayAccess {
+        name: ident,
+        indices: exps.into_iter().map(|(_, exp, _)| exp).collect(),
+      })
+    }
   },
 };
 
-Decl: Decl = {
-  <const_decl: ConstDecl> => Decl::ConstDecl { const_decl },
-  <var_decl: VarDecl> => Decl::VarDecl { var_decl },
+Decl: Box<dyn Node> = {
+  <const_decl: ConstDecl> => const_decl,
+  <var_decl: VarDecl> => var_decl,
 }
 
-ConstDecl: ConstDecl = {
+ConstDecl: Box<dyn Node> = {
   "const" <b_type: BType> <const_def: ConstDef> <other_const_defs: ("," ConstDef)*> ";" => {
     let mut const_defs = vec![const_def];
     for (_, def) in other_const_defs {
       const_defs.push(def);
     }
-    ConstDecl { b_type, const_defs }
+    Box::new(
+      DeclAggr {
+        typ: b_type,
+        mutable: false,
+        raw_decls: const_defs.into_iter().collect(),
+      }
+    )
   }
 }
 
-ConstDef: ConstDef = {
-  <ident: Ident> <const_exps: ("[" ConstExp "]")*> "=" <const_init_val: ConstInitVal> => ConstDef { 
-    ident,
-    const_exps: const_exps.into_iter().map(|(_, exp, _)| exp).collect(),
-    const_init_val: RefCell::new(const_init_val),
+ConstDef: RawDecl = {
+  <ident: Ident> <const_exps: ("[" ConstExp "]")*> "=" <const_init_val: ConstInitVal> => {
+    // if const_exps is empty, then it's a scalar, we directly construct a VarDecl
+    RawDecl {
+      ident,
+      const_exps: const_exps.into_iter().map(|(_, exp, _)| exp).collect(),
+      init_val: Some(const_init_val),
+    }
   }
 };
 
-ConstInitVal: ConstInitVal = {
-  <const_exp: ConstExp> => ConstInitVal::ConstExp(const_exp),
-  "{" "}" => ConstInitVal::ConstArrayExp(vec![]),
+ConstInitVal: Box<dyn Node> = {
+  <const_exp: ConstExp> => const_exp,
+  "{" "}" => Box::new(ArrayInitVal { init_vals: vec![] }),
   "{" <first_init_val: ConstInitVal> <other_init_vals: ("," ConstInitVal)*> "}" => {
     let mut init_vals = vec![first_init_val];
     for (_, val) in other_init_vals {
       init_vals.push(val);
     }
-    ConstInitVal::ConstArrayExp(init_vals)
+    Box::new(ArrayInitVal { init_vals })
   }
 };
 
-ConstExp: ConstExp = {
-  <exp: Exp> => ConstExp { exp: Box::new(exp) }
+ConstExp: Box<dyn Node> = {
+  <exp: Exp> => exp,
 }
 
-VarDecl: VarDecl = {
+VarDecl: Box<dyn Node> = {
   <b_type: BType> <var_def: VarDef> <other_var_defs: ("," VarDef)*> ";" => {
     let mut var_defs = vec![var_def];
     for (_, def) in other_var_defs {
       var_defs.push(def);
     }
-    VarDecl { b_type, var_defs }
+    Box::new(
+      DeclAggr {
+        typ: b_type,
+        mutable: true,
+        raw_decls: var_defs.into_iter().collect(),
+      }
+    )
   }
 }
 
-VarDef: VarDef = {
-  <ident: Ident> <const_exps: ("[" ConstExp "]")*> "=" <init_val: InitVal> => VarDef { 
+VarDef: RawDecl = {
+  <ident: Ident> <const_exps: ("[" ConstExp "]")*> "=" <init_val: InitVal> => RawDecl {
     ident, 
     const_exps: const_exps.into_iter().map(|(_, exp, _)| exp).collect(), 
-    init_val: RefCell::new(Some(init_val))
+    init_val: Some(init_val),
   },
-  <ident: Ident> <const_exps: ("[" ConstExp "]")*> => VarDef { 
+  <ident: Ident> <const_exps: ("[" ConstExp "]")*> => RawDecl { 
     ident, 
     const_exps: const_exps.into_iter().map(|(_, exp, _)| exp).collect(), 
-    init_val: RefCell::new(None)
+    init_val: None,
   },
 };
 
-InitVal: InitVal = {
-  <exp: Exp> => InitVal::Exp(Box::new(exp)),
-  "{" "}" => InitVal::ArrayExp(vec![]),
+InitVal: Box<dyn Node> = {
+  <exp: Exp> => exp,
+  "{" "}" => Box::new(ArrayInitVal { init_vals: vec![] }),
   "{" <first_init_val: InitVal> <other_init_vals: ("," InitVal)*> "}" => {
     let mut init_vals = vec![first_init_val];
     for (_, val) in other_init_vals {
       init_vals.push(val);
     }
-    InitVal::ArrayExp(init_vals)
+    Box::new(ArrayInitVal { init_vals })
   }
 };
 
 // The priority of MulExp is higher than AddExp, so we should parse AddExp first, 
 // which makes MulExp processed before AddExp in stmt_parser.
-Exp: Exp = { 
-  <lor_exp: LOrExp> => Exp::LOrExp { lor_exp: Box::new(lor_exp) },
+Exp: Box<dyn Node> = { 
+  <lor_exp: LOrExp> => lor_exp,
 };
 
 // the match items in the block must follow the priority strictly
-LOrExp: LOrExp = {
-  <lor_exp: LOrExp> <lor_op: LOrOp> <land_exp: LAndExp> => LOrExp::LOrExp { 
-    lor_exp: Box::new(lor_exp), 
-    lor_op, 
-    land_exp: Box::new(land_exp) 
-  },
-  <land_exp: LAndExp> => LOrExp::LAndExp { land_exp: Box::new(land_exp) },
+LOrExp: Box<dyn Node> = {
+  <lor_exp: LOrExp> <lor_op: LOrOp> <land_exp: LAndExp> => Box::new(
+    BinaryOp { 
+      lhs: lor_exp,
+      op: lor_op,
+      rhs: land_exp,
+    }
+  ),
+  <land_exp: LAndExp> => land_exp,
 };
 
-LAndExp: LAndExp = {
-  <land_exp: LAndExp> <land_op: LAndOp> <eq_exp: EqExp> => LAndExp::LAndExp { 
-    land_exp: Box::new(land_exp), 
-    land_op, 
-    eq_exp: Box::new(eq_exp) 
-  },
-  <eq_exp: EqExp> => LAndExp::EqExp { eq_exp: Box::new(eq_exp) },
+LAndExp: Box<dyn Node> = {
+  <land_exp: LAndExp> <land_op: LAndOp> <eq_exp: EqExp> => Box::new(
+    BinaryOp { 
+      lhs: land_exp, 
+      op: land_op, 
+      rhs: eq_exp 
+    }
+  ),
+  <eq_exp: EqExp> => eq_exp,
 };
 
-EqExp: EqExp = {
-  <eq_exp: EqExp> <eq_op: EqOp> <rel_exp: RelExp> => EqExp::EqExp { 
-    eq_exp: Box::new(eq_exp), 
-    eq_op, 
-    rel_exp: Box::new(rel_exp) 
-  },
-  <rel_exp: RelExp> => EqExp::RelExp { rel_exp: Box::new(rel_exp) },
+EqExp: Box<dyn Node> = {
+  <eq_exp: EqExp> <eq_op: EqOp> <rel_exp: RelExp> => Box::new(
+    BinaryOp { 
+      lhs: eq_exp, 
+      op: eq_op, 
+      rhs: rel_exp 
+    }
+  ),
+  <rel_exp: RelExp> => rel_exp,
 };
 
-RelExp: RelExp = {
-  <rel_exp: RelExp> <rel_op: RelOp> <add_exp: AddExp> => RelExp::RelExp { 
-    rel_exp: Box::new(rel_exp), 
-    rel_op, 
-    add_exp: Box::new(add_exp) 
-  },
-  <add_exp: AddExp> => RelExp::AddExp { add_exp: Box::new(add_exp) },
+RelExp: Box<dyn Node> = {
+  <rel_exp: RelExp> <rel_op: RelOp> <add_exp: AddExp> => Box::new(
+    BinaryOp { 
+      lhs: rel_exp, 
+      op: rel_op, 
+      rhs: add_exp 
+    }
+  ),
+  <add_exp: AddExp> => add_exp,
 };
 
-UnaryExp: UnaryExp = {
-  <unary_op: UnaryOp> <unary_exp: UnaryExp> => UnaryExp::UnaryExp { unary_op: unary_op, unary_exp: Box::new(unary_exp) },
+UnaryExp: Box<dyn Node> = {
+  <unary_op: UnaryOp> <unary_exp: UnaryExp> => Box::new(
+    UnaryOp { 
+      op: unary_op, 
+      operand: unary_exp 
+    }
+  ),
   // function calling
-  <ident: Ident> "(" <arg: Exp> <other_args: ("," Exp)*> ")" => UnaryExp::FunctionCall {
-      ident,
+  <ident: Ident> "(" <arg: Exp> <other_args: ("," Exp)*> ")" => Box::new(
+    Call {
+      func_name: ident,
       args: {
-          let mut arg_list = vec![arg];
-          for (_, other_arg) in other_args {
-              arg_list.push(other_arg);
-          }
-          arg_list
-      }
-  },
-  <ident: Ident> "(" ")" => UnaryExp::FunctionCall {
-      ident,
+        let mut args_vec = vec![arg];
+        for (_, other_arg) in other_args {
+          args_vec.push(other_arg);
+        }
+        args_vec
+      },
+    }
+  ),
+  <ident: Ident> "(" ")" => Box::new(
+    Call {
+      func_name: ident,
       args: vec![],
-  },
-  <primary_exp: PrimaryExp> => UnaryExp::PrimaryExp { exp: Box::new(primary_exp) },
+    }
+  ),
+  <primary_exp: PrimaryExp> => primary_exp,
 };
 
-AddExp: AddExp = {
-  <add_exp: AddExp> <add_op: AddOp> <mul_exp: MulExp> => AddExp::AddExp { 
-    add_exp: Box::new(add_exp), 
-    add_op, 
-    mul_exp: Box::new(mul_exp) 
-  },
-  <mul_exp: MulExp> => AddExp::MulExp { mul_exp: Box::new(mul_exp) },
+AddExp: Box<dyn Node> = {
+  <add_exp: AddExp> <add_op: AddOp> <mul_exp: MulExp> => Box::new(
+    BinaryOp { 
+      lhs: add_exp, 
+      op: add_op, 
+      rhs: mul_exp
+    }
+  ),
+  <mul_exp: MulExp> => mul_exp,
 };
 
-MulExp: MulExp = {
-  <mul_exp: MulExp> <mul_op: MulOp> <unary_exp: UnaryExp> => MulExp::MulExp { 
-    mul_exp: Box::new(mul_exp), 
-    mul_op, 
-    unary_exp: Box::new(unary_exp) 
-  },
-  <unary_exp: UnaryExp> => MulExp::UnaryExp { unary_exp: Box::new(unary_exp) },
+MulExp: Box<dyn Node> = {
+  <mul_exp: MulExp> <mul_op: MulOp> <unary_exp: UnaryExp> => Box::new(
+    BinaryOp { 
+      lhs: mul_exp, 
+      op: mul_op, 
+      rhs: unary_exp 
+    }
+  ),
+  <unary_exp: UnaryExp> => unary_exp,
 };
 
-PrimaryExp: PrimaryExp = {
-  "(" <exp: Exp> ")" => PrimaryExp::Exp { exp: Box::new(exp) },
-  <l_val: LVal> => PrimaryExp::LVal { l_val },
-  <num: Number> => PrimaryExp::Number { value: num },
+PrimaryExp: Box<dyn Node> = {
+  "(" <exp: Exp> ")" => exp,
+  <l_val: LVal> => l_val,
+  <num: Number> => num,
 };
 
-LOrOp: LOrOp = {
-  "||" => LOrOp::Or,
+LOrOp: Op = {
+  "||" => Op::Or,
 };
 
-LAndOp: LAndOp = {
-  "&&" => LAndOp::And,
+LAndOp: Op = {
+  "&&" => Op::And,
 };
 
-EqOp: EqOp = {
-  "==" => EqOp::Eq,
-  "!=" => EqOp::Ne,
+EqOp: Op = {
+  "==" => Op::Eq,
+  "!=" => Op::Ne,
 };
 
-RelOp: RelOp = {
-  "<" => RelOp::Lt,
-  "<=" => RelOp::Le,
-  ">" => RelOp::Gt,
-  ">=" => RelOp::Ge,
+RelOp: Op = {
+  "<" => Op::Lt,
+  "<=" => Op::Le,
+  ">" => Op::Gt,
+  ">=" => Op::Ge,
 };
 
-UnaryOp: UnaryOp = {
-  r"\+" => UnaryOp::Plus,
-  r"-" => UnaryOp::Minus,
-  r"!" => UnaryOp::Not,
+UnaryOp: Op = {
+  r"\+" => Op::Add,
+  r"-" => Op::Sub,
+  r"!" => Op::Not,
 };
 
-MulOp: MulOp = {
-  r"\*" => MulOp::Mul,
-  r"/" => MulOp::Div,
-  r"%" => MulOp::Mod,
+MulOp: Op = {
+  r"\*" => Op::Mul,
+  r"/" => Op::Div,
+  r"%" => Op::Mod,
 };
 
-AddOp: AddOp = {
-  r"\+" => AddOp::Add,
-  r"-" => AddOp::Sub,
+AddOp: Op = {
+  r"\+" => Op::Add,
+  r"-" => Op::Sub,
 };
 
-Number: i32 = <num: IntConst> => <>;
+Number: Box<dyn Node> = {
+  <int: IntConst> => Box::new(Int(int)),
+  <float: FloatConst> => Box::new(Float(float)),
+}
 
 Ident: String = <s: r"[_a-zA-Z][_a-zA-Z0-9]*"> => {
   s.to_string()
@@ -352,4 +418,9 @@ IntConst: i32 = {
   r"[1-9][0-9]*" => i32::from_str_radix(<>, 10).unwrap(),
   r"0[0-7]*" => i32::from_str_radix(<>, 8).unwrap(),
   r"0[xX][0-9a-fA-F]+" => i32::from_str_radix(&<>[2..], 16).unwrap(),
+};
+
+FloatConst: f32 = {
+  r"[0-9]+\.[0-9]*([eE][+-]?[0-9]+)?" => f32::from_str(<>).unwrap(),
+  r"[0-9]+[eE][+-]?[0-9]+" => f32::from_str(<>).unwrap(),
 };
