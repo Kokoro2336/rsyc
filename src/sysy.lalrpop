@@ -1,5 +1,7 @@
-use crate::global::config::Type;
+use crate::base::config::Type;
 use crate::frontend::ast::*;
+use crate::frontend::parse::*;
+use crate::base::utils::{is, cast_deref};
 
 // lalrpop 里的约定
 grammar;
@@ -19,53 +21,74 @@ match {
 pub CompUnit: Box<dyn Node> = {
   <global_objs: (GlobalObj)*> => {
     Box::new(
-      CompUnit {
-        nodes: global_objs.into_iter().collect(),
+      Block {
+        statements: {
+          let mut vec = vec![];
+          for obj in global_objs {
+            if is::<DeclAggr>(&*obj) {
+              let decl_aggr = cast_deref::<DeclAggr>(obj).unwrap();
+              for decl in decl_aggr.decls.into_iter() {
+                vec.push(decl);
+              }
+            } else {
+              vec.push(obj);
+            }
+          }
+          vec
+        }
       }
     )
   }
 };
 
 GlobalObj: Box<dyn Node> = {
-  <func_def: FuncDef> => Box::new(func_def),
-  <global_decl: Decl> => Box::new(global_decl),
+  <func_def: FuncDef> => func_def,
+  <global_decl: Decl> => global_decl,
 };
 
 // 同上, 不解释
-FuncDef: Function = {
+FuncDef: Box<dyn Node> = {
   <b_type: BType> <ident: Ident> "(" <func_fparams: FuncFParams> ")" <block: Block> => {
     // construct FuncDef struct, using shorthand <> to pass all named fields
-    Function { 
-      name: ident,
-      params: func_fparams,
-      body: block,
-      return_type: b_type,
-    }
+    Box::new(
+      Function { 
+        name: ident,
+        params: func_fparams,
+        body: block,
+        return_type: b_type,
+      }
+    )
   },
   // case with no parameters
   <b_type: BType> <ident: Ident> "(" ")" <block: Block> => {
-    Function { 
-      name: ident,
-      params: vec![],
-      body: block,
-      return_type: b_type,
-     }
+    Box::new(
+      Function { 
+        name: ident,
+        params: vec![],
+        body: block,
+        return_type: b_type,
+      }
+    )
   },
   "void" <ident: Ident> "(" <func_fparams: FuncFParams> ")" <block: Block> => {
-    Function { 
-      name: ident,
-      params: func_fparams,
-      body: block,
-      return_type: Type::Void,
-    }
+    Box::new(
+      Function { 
+        name: ident,
+        params: func_fparams,
+        body: block,
+        return_type: Type::Void,
+      }
+    )
   },
   "void" <ident: Ident> "(" ")" <block: Block> => {
-    Function { 
-      name: ident,
-      params: vec![],
-      body: block,
-      return_type: Type::Void,
-     }
+    Box::new(
+      Function { 
+        name: ident,
+        params: vec![],
+        body: block,
+        return_type: Type::Void,
+      }
+    )
   },
 };
 
@@ -85,7 +108,14 @@ FuncFParam: (String, Type) = {
     let arr_type = Type::Pointer {
       base: Box::new(Type::Array {
         base: Box::new(param_type),
-        dims: other_const_exps.into_iter().map(|(_, exp, _)| exp).collect::<Vec<ConstExp>>(),
+        dims: other_const_exps.into_iter().map(|(_, exp, _)| {
+          // we only need the size info here, so we can assume the ConstExp is IntConst
+          if let Some(int_node) = exp.as_any().downcast_ref::<Int>() {
+            int_node.0 as u32
+          } else {
+            panic!("Array size must be a constant integer: {:?}", exp);
+          }
+        }).collect::<Vec<u32>>(),
       }),
     };
     (ident, arr_type)
@@ -102,11 +132,24 @@ BType: Type = {
   "float" => Type::Float,
 };
 
-Block: Box<dyn Node> = "{" <block_items: (BlockItem)*> "}" => Box::new(Block { statements: block_items.into_iter().collect() });
+Block: Box<dyn Node> = "{" <block_items: (BlockItem)*> "}" => Box::new(Block { statements: {
+  let mut vec = vec![];
+  for item in block_items {
+    if is::<DeclAggr>(&*item) {
+      let decl_aggr = cast_deref::<DeclAggr>(item).unwrap();
+      for decl in decl_aggr.decls.into_iter() {
+        vec.push(decl);
+      }
+    } else {
+      vec.push(item);
+    }
+  }
+  vec
+}});
 
 BlockItem: Box<dyn Node> = {
   <stmt: Stmt> => stmt,
-  <decl: Decl> => Box::new(decl),
+  <decl: Decl> => decl,
 };
 
 Stmt: Box<dyn Node> = {
@@ -117,42 +160,42 @@ Stmt: Box<dyn Node> = {
 CloseStmt: Box<dyn Node> = {
   <simple_stmt: SimpleStmt> => simple_stmt,
   "if" "(" <condition: Exp> ")" <then_stmt: CloseStmt> "else" <else_stmt: CloseStmt> => Box::new(If {
-      condition: Box::new(condition),
+      condition: condition,
       then_block: then_stmt,
       else_block: Some(else_stmt),
   }),
   "while" "(" <condition: Exp> ")" <body_stmt: CloseStmt> => Box::new(While {
-      condition: Box::new(condition),
+      condition: condition,
       body: body_stmt,
   }),
 };
 
 OpenStmt: Box<dyn Node> = {
   "if" "(" <condition: Exp> ")" <then_stmt: CloseStmt> "else" <else_stmt: OpenStmt> => Box::new(If {
-      condition: Box::new(condition),
+      condition: condition,
       then_block: then_stmt,
       else_block: Some(else_stmt),
   }),
   "if" "(" <condition: Exp> ")" <then_stmt: Stmt> => Box::new(If {
-      condition: Box::new(condition),
+      condition: condition,
       then_block: then_stmt,
       else_block: None,
   }),
   "while" "(" <condition: Exp> ")" <body_stmt: OpenStmt> => Box::new(While {
-      condition: Box::new(condition),
+      condition: condition,
       body: body_stmt,
   }),
 };
 
 SimpleStmt: Box<dyn Node> = {
-  <l_val: LVal> "=" <exp: Exp> ";" => Box::new(Assign { lval: Box::new(l_val), rval: Box::new(exp) }),
+  <l_val: LVal> "=" <exp: Exp> ";" => Box::new(Assign { lhs: l_val, rhs: exp }),
   <block: Block> => block,
   // return statement should have higher priority that RawExp.
-  "return" <exp: Exp> ";" => Box::new(Return(Some(Box::new(exp)))),
+  "return" <exp: Exp> ";" => Box::new(Return(Some(exp))),
   "return" ";" => Box::new(Return(None)),
   "break" ";" => Box::new(Break()),
   "continue" ";" => Box::new(Continue()),
-  <exp: Exp> ";" => Box::new(exp),
+  <exp: Exp> ";" => exp,
   ";" => Box::new(Empty()),
 };
 
@@ -184,20 +227,30 @@ ConstDecl: Box<dyn Node> = {
     }
     Box::new(
       DeclAggr {
-        typ: b_type,
-        mutable: false,
-        raw_decls: const_defs.into_iter().collect(),
+        decls: canonicalize(
+          RawDecl {
+            typ: b_type,
+            mutable: false,
+            raw_decls: const_defs.into_iter().collect(),
+          }
+        ),
       }
     )
   }
 }
 
-ConstDef: RawDecl = {
+ConstDef: RawDef = {
   <ident: Ident> <const_exps: ("[" ConstExp "]")*> "=" <const_init_val: ConstInitVal> => {
     // if const_exps is empty, then it's a scalar, we directly construct a VarDecl
-    RawDecl {
+    RawDef {
       ident,
-      const_exps: const_exps.into_iter().map(|(_, exp, _)| exp).collect(),
+      const_exps: const_exps.into_iter().map(|(_, exp, _)| 
+        if let Some(int_node) = exp.as_any().downcast_ref::<Int>() {
+          int_node.0 as u32
+        } else {
+          panic!("Array size must be a constant integer: {:?}", exp);
+        }
+      ).collect(),
       init_val: Some(const_init_val),
     }
   }
@@ -216,7 +269,10 @@ ConstInitVal: Box<dyn Node> = {
 };
 
 ConstExp: Box<dyn Node> = {
-  <exp: Exp> => exp,
+  <exp: Exp> => {
+    // do constant folding here
+    fold(&exp)
+  },
 }
 
 VarDecl: Box<dyn Node> = {
@@ -225,25 +281,42 @@ VarDecl: Box<dyn Node> = {
     for (_, def) in other_var_defs {
       var_defs.push(def);
     }
+
     Box::new(
       DeclAggr {
-        typ: b_type,
-        mutable: true,
-        raw_decls: var_defs.into_iter().collect(),
+        decls: canonicalize(
+          RawDecl {
+            typ: b_type,
+            mutable: true,
+            raw_decls: var_defs.into_iter().collect(),
+          }
+        ),
       }
     )
   }
 }
 
-VarDef: RawDecl = {
-  <ident: Ident> <const_exps: ("[" ConstExp "]")*> "=" <init_val: InitVal> => RawDecl {
+VarDef: RawDef = {
+  <ident: Ident> <const_exps: ("[" ConstExp "]")*> "=" <init_val: InitVal> => RawDef {
     ident, 
-    const_exps: const_exps.into_iter().map(|(_, exp, _)| exp).collect(), 
+    const_exps: const_exps.into_iter().map(|(_, exp, _)| {
+      if let Some(int_node) = exp.as_any().downcast_ref::<Int>() {
+        int_node.0 as u32
+      } else {
+        panic!("Array size must be a constant integer: {:?}", exp);
+      }
+    }).collect(), 
     init_val: Some(init_val),
   },
-  <ident: Ident> <const_exps: ("[" ConstExp "]")*> => RawDecl { 
+  <ident: Ident> <const_exps: ("[" ConstExp "]")*> => RawDef { 
     ident, 
-    const_exps: const_exps.into_iter().map(|(_, exp, _)| exp).collect(), 
+    const_exps: const_exps.into_iter().map(|(_, exp, _)| {
+      if let Some(int_node) = exp.as_any().downcast_ref::<Int>() {
+        int_node.0 as u32
+      } else {
+        panic!("Array size must be a constant integer: {:?}", exp);
+      }
+    }).collect(), 
     init_val: None,
   },
 };
@@ -421,6 +494,5 @@ IntConst: i32 = {
 };
 
 FloatConst: f32 = {
-  r"[0-9]+\.[0-9]*([eE][+-]?[0-9]+)?" => f32::from_str(<>).unwrap(),
-  r"[0-9]+[eE][+-]?[0-9]+" => f32::from_str(<>).unwrap(),
+  r"[+-]?(?:(?:[0-9]*\.[0-9]+|[0-9]+\.)(?:[eE][+-]?[0-9]+)?|[0-9]+[eE][+-]?[0-9]+)" => str::parse::<f32>(&<>).unwrap(),
 };

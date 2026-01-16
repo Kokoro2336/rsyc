@@ -8,16 +8,11 @@ pub trait Node: Any + std::fmt::Debug {
 }
 
 #[derive(Debug)]
-pub struct CompUnit {
-    nodes: Vec<Box<dyn Node>>,
-}
-
-#[derive(Debug)]
 pub struct Function {
-    name: String,
-    params: Vec<(String, Type)>,
-    return_type: Type,
-    body: Box<dyn Node>,
+    pub name: String,
+    pub params: Vec<(String, Type)>,
+    pub return_type: Type,
+    pub body: Box<dyn Node>,
 }
 
 #[derive(Debug)]
@@ -25,99 +20,99 @@ pub struct Break();
 #[derive(Debug)]
 pub struct Continue();
 #[derive(Debug)]
-pub struct Return(Option<Box<dyn Node>>);
+pub struct Return(pub Option<Box<dyn Node>>);
 
 #[derive(Debug)]
 pub struct Block {
-    statements: Vec<Box<dyn Node>>,
+    pub statements: Vec<Box<dyn Node>>,
 }
 
 #[derive(Debug)]
 pub struct Assign {
-    lhs: Box<dyn Node>,
-    rhs: Box<dyn Node>,
+    pub lhs: Box<dyn Node>,
+    pub rhs: Box<dyn Node>,
 }
 
 #[derive(Debug)]
 pub struct If {
-    condition: Box<dyn Node>,
-    then_block: Box<dyn Node>,
-    else_block: Option<Box<dyn Node>>,
+    pub condition: Box<dyn Node>,
+    pub then_block: Box<dyn Node>,
+    pub else_block: Option<Box<dyn Node>>,
 }
 
 #[derive(Debug)]
 pub struct While {
-    condition: Box<dyn Node>,
-    body: Box<dyn Node>,
+    pub condition: Box<dyn Node>,
+    pub body: Box<dyn Node>,
 }
 
 #[derive(Debug)]
 pub struct BinaryOp {
-    lhs: Box<dyn Node>,
-    op: Op,
-    rhs: Box<dyn Node>,
+    pub lhs: Box<dyn Node>,
+    pub op: Op,
+    pub rhs: Box<dyn Node>,
 }
 
 #[derive(Debug)]
 pub struct UnaryOp {
-    op: Op,
-    operand: Box<dyn Node>,
+    pub op: Op,
+    pub operand: Box<dyn Node>,
 }
 
 #[derive(Debug)]
 pub struct Call {
-    func_name: String,
-    args: Vec<Box<dyn Node>>,
+    pub func_name: String,
+    pub args: Vec<Box<dyn Node>>,
 }
 
 // Var
 #[derive(Debug)]
 pub struct VarDecl {
-    name: String,
-    typ: Type,
-    mutable: bool,
-    init_value: Option<Box<dyn Node>>,
+    pub name: String,
+    pub typ: Type,
+    pub mutable: bool,
+    pub init_value: Option<Box<dyn Node>>,
 }
 
 #[derive(Debug)]
 pub struct VarAccess {
-    name: String,
+    pub name: String,
 }
 
 // Array
 #[derive(Debug)]
 pub struct ConstArray {
-    name: String,
-    typ: Type,
-    init_values: Vec<Box<dyn Node>>,
+    pub name: String,
+    pub typ: Type,
+    pub init_values: Vec<Box<dyn Node>>,
 }
 
 #[derive(Debug)]
 pub struct LocalArray {
-    name: String,
-    typ: Type,
-    init_values: Option<Vec<Box<dyn Node>>>,
+    pub name: String,
+    pub typ: Type,
+    pub init_values: Option<Vec<Box<dyn Node>>>,
 }
 
 #[derive(Debug)]
 pub struct ArrayAccess {
-    name: String,
-    indices: Vec<Box<dyn Node>>,
+    pub name: String,
+    pub indices: Vec<Box<dyn Node>>,
 }
 
 #[derive(Debug)]
 pub struct ArrayAssign {
-    name: String,
-    indices: Vec<Box<dyn Node>>,
+    pub name: String,
+    pub indices: Vec<Box<dyn Node>>,
 }
 
 #[derive(Debug)]
 pub struct Empty();
 
 #[derive(Debug)]
-pub struct Int(i32);
+pub struct Int(pub i32);
 #[derive(Debug)]
-pub struct Float(f32);
+pub struct Float(pub f32);
 
 #[derive(Debug)]
 pub enum Op {
@@ -152,28 +147,54 @@ macro_rules! impl_node {
 }
 
 impl_node!(
-    CompUnit, Function, Block, Break, Continue, Return, BinaryOp, UnaryOp, Call, 
-    VarDecl, VarAccess, ConstArray, LocalArray, ArrayAccess, ArrayAssign, Empty,
-    Assign, If, While, Int, Float, DeclAggr, ArrayInitVal
+    Function,
+    Block,
+    Break,
+    Continue,
+    Return,
+    BinaryOp,
+    UnaryOp,
+    Call,
+    VarDecl,
+    VarAccess,
+    ConstArray,
+    LocalArray,
+    ArrayAccess,
+    ArrayAssign,
+    Empty,
+    Assign,
+    If,
+    While,
+    Int,
+    Float,
+    DeclAggr,
+    RawDecl,
+    RawDef,
+    ArrayInitVal
 );
 
 // Raw struct for parsing
 // Original defined declaration structures
 #[derive(Debug)]
 pub struct DeclAggr {
-  pub typ: Type,
-  pub mutable: bool,
-  pub raw_decls: Vec<RawDecl>,
+    pub decls: Vec<Box<dyn Node>>,
 }
 
 #[derive(Debug)]
 pub struct RawDecl {
-  pub ident: String,
-  pub const_exps: Vec<Box<dyn Node>>,
-  pub init_val: Option<Box<dyn Node>>,
+    pub typ: Type,
+    pub mutable: bool,
+    pub raw_decls: Vec<RawDef>,
+}
+
+#[derive(Debug)]
+pub struct RawDef {
+    pub ident: String,
+    pub const_exps: Vec<u32>,
+    pub init_val: Option<Box<dyn Node>>,
 }
 
 #[derive(Debug)]
 pub struct ArrayInitVal {
-  pub init_vals: Vec<Box<dyn Node>>,
+    pub init_vals: Vec<Box<dyn Node>>,
 }
