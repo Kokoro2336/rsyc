@@ -389,8 +389,8 @@ RelOp: Op = {
 };
 
 UnaryOp: Op = {
-  r"\+" => Op::Add,
-  r"-" => Op::Sub,
+  r"\+" => Op::Plus,
+  r"-" => Op::Minus,
   r"!" => Op::Not,
 };
 
