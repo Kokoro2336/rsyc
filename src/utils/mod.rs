@@ -1,3 +1,5 @@
+pub mod indexed_arena;
+
 use std::any::Any;
 use crate::frontend::ast::{Empty, Node};
 

@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::vec::Vec;
+use crate::utils::indexed_arena::{IndexedArena, CompactTrait};
 
 #[derive(Debug, Clone)]
 pub enum KoopaOpCode {
@@ -83,4 +84,8 @@ impl IdAllocator {
     pub fn get_next_id(&self) -> u32 {
         self.current_id
     }
+}
+
+pub struct Program {
+    // pub dfg: IndexedArena<dyn crate::base::op::CompactTrait>,
 }

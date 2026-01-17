@@ -1,9 +1,8 @@
 use clap::Parser;
 use lalrpop_util::lalrpop_mod;
 use std::fs::read_to_string;
-use std::io::{Result, Write};
+use std::io::{Result};
 use std::path::PathBuf;
-use std::rc::Rc;
 
 mod asm;
 mod base;
@@ -11,7 +10,8 @@ mod frontend;
 mod log;
 mod opt;
 mod utils;
-use crate::frontend::ast::Node;
+use crate::frontend::semantic::Semantic;
+use crate::base::pass::Pass;
 use crate::log::setup;
 
 use log::info;
@@ -75,7 +75,13 @@ fn main() -> Result<()> {
     let input = read_to_string(input)?;
 
     // 调用 lalrpop 生成的 parser 解析输入文件
-    let result = sysy::CompUnitParser::new().parse(&input);
+    let mut result = sysy::CompUnitParser::new().parse(&input).unwrap();
     info!("\nParsed result: {:#?}", result);
+
+    info!("Start Semantic Analysis.");
+    let mut pass: Box<dyn Pass> = Box::new(Semantic::new(&mut result));
+    pass.run();
+    info!("Finish Semantic Analysis");
+
     Ok(())
 }
