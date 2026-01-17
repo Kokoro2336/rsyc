@@ -1,7 +1,7 @@
 use crate::asm::config::RISCV_BITS;
 
 /// type of value
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Int,
     Void,

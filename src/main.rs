@@ -7,8 +7,8 @@ use std::rc::Rc;
 mod asm;
 mod frontend;
 mod base;
-mod ir;
-mod util;
+mod opt;
+mod utils;
 use crate::frontend::ast::Node;
 
 // 引用 lalrpop 生成的解析器

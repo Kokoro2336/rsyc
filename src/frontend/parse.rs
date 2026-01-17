@@ -1,5 +1,5 @@
-use crate::base::config::Type;
-use crate::base::utils::{cast, cast_deref, is};
+use crate::base::r#type::Type;
+use crate::utils::{cast, cast_deref, is};
 use crate::frontend::ast::*;
 
 use std::cell::RefCell;
@@ -9,7 +9,7 @@ use tool::fix;
 /**
  * A module which provides a variety of utilities for parsing.
  */
-use crate::frontend::ast::{BinaryOp, Float, Int, Node, Op, UnaryOp};
+use crate::frontend::ast::{BinaryOp, Literal, Node, Op, UnaryOp};
 
 // early constant folding optimization
 pub fn fold(node: &Box<dyn Node>) -> Box<dyn Node> {
@@ -18,51 +18,53 @@ pub fn fold(node: &Box<dyn Node>) -> Box<dyn Node> {
         let lhs = fold(&bin_op.lhs);
         let rhs = fold(&bin_op.rhs);
 
-        if is::<Int>(&*lhs) && is::<Int>(&*rhs) {
-            let lhs_int = cast::<Int>(&*lhs).unwrap();
-            let rhs_int = cast::<Int>(&*rhs).unwrap();
-            let result = match bin_op.op {
-                Op::Add => lhs_int.0 + rhs_int.0,
-                Op::Sub => lhs_int.0 - rhs_int.0,
-                Op::Mul => lhs_int.0 * rhs_int.0,
-                Op::Div => lhs_int.0 / rhs_int.0,
-                Op::Mod => lhs_int.0 % rhs_int.0,
-                _ => panic!("Unsupported operation for constant folding: {:?}", bin_op),
-            };
-            Box::new(Int(result))
-        } else if is::<Float>(&*lhs) && is::<Float>(&*rhs) {
-            let lhs_float = cast::<Float>(&*lhs).unwrap();
-            let rhs_float = cast::<Float>(&*rhs).unwrap();
-            let result = match bin_op.op {
-                Op::Add => lhs_float.0 + rhs_float.0,
-                Op::Sub => lhs_float.0 - rhs_float.0,
-                Op::Mul => lhs_float.0 * rhs_float.0,
-                Op::Div => lhs_float.0 / rhs_float.0,
-                _ => panic!("Unsupported operation for constant folding: {:?}", bin_op),
-            };
-            Box::new(Float(result))
-        } else if is::<Float>(&*lhs) && is::<Int>(&*rhs) {
-            let lhs_float = cast::<Float>(&*lhs).unwrap();
-            let rhs_int = cast::<Int>(&*rhs).unwrap();
-            let result = match bin_op.op {
-                Op::Add => lhs_float.0 + rhs_int.0 as f32,
-                Op::Sub => lhs_float.0 - rhs_int.0 as f32,
-                Op::Mul => lhs_float.0 * rhs_int.0 as f32,
-                Op::Div => lhs_float.0 / rhs_int.0 as f32,
-                _ => panic!("Unsupported operation for constant folding: {:?}", bin_op),
-            };
-            Box::new(Float(result))
-        } else if is::<Int>(&*lhs) && is::<Float>(&*rhs) {
-            let lhs_int = cast::<Int>(&*lhs).unwrap();
-            let rhs_float = cast::<Float>(&*rhs).unwrap();
-            let result = match bin_op.op {
-                Op::Add => lhs_int.0 as f32 + rhs_float.0,
-                Op::Sub => lhs_int.0 as f32 - rhs_float.0,
-                Op::Mul => lhs_int.0 as f32 * rhs_float.0,
-                Op::Div => lhs_int.0 as f32 / rhs_float.0,
-                _ => panic!("Unsupported operation for constant folding: {:?}", bin_op),
-            };
-            Box::new(Float(result))
+        if is::<Literal>(&*lhs) && is::<Literal>(&*rhs) {
+            let lhs_lit = cast::<Literal>(&*lhs).unwrap();
+            let rhs_lit = cast::<Literal>(&*rhs).unwrap();
+
+            match (lhs_lit, rhs_lit) {
+                (Literal::Int(lhs_val), Literal::Int(rhs_val)) => {
+                    let result = match bin_op.op {
+                        Op::Add => lhs_val + rhs_val,
+                        Op::Sub => lhs_val - rhs_val,
+                        Op::Mul => lhs_val * rhs_val,
+                        Op::Div => lhs_val / rhs_val,
+                        Op::Mod => lhs_val % rhs_val,
+                        _ => panic!("Unsupported operation for constant folding: {:?}", bin_op),
+                    };
+                    Box::new(Literal::Int(result))
+                }
+                (Literal::Float(lhs_val), Literal::Float(rhs_val)) => {
+                    let result = match bin_op.op {
+                        Op::Add => lhs_val + rhs_val,
+                        Op::Sub => lhs_val - rhs_val,
+                        Op::Mul => lhs_val * rhs_val,
+                        Op::Div => lhs_val / rhs_val,
+                        _ => panic!("Unsupported operation for constant folding: {:?}", bin_op),
+                    };
+                    Box::new(Literal::Float(result))
+                }
+                (Literal::Float(lhs_val), Literal::Int(rhs_val)) => {
+                    let result = match bin_op.op {
+                        Op::Add => lhs_val + *rhs_val as f32,
+                        Op::Sub => lhs_val - *rhs_val as f32,
+                        Op::Mul => lhs_val * *rhs_val as f32,
+                        Op::Div => lhs_val / *rhs_val as f32,
+                        _ => panic!("Unsupported operation for constant folding: {:?}", bin_op),
+                    };
+                    Box::new(Literal::Float(result))
+                }
+                (Literal::Int(lhs_val), Literal::Float(rhs_val)) => {
+                    let result = match bin_op.op {
+                        Op::Add => *lhs_val as f32 + rhs_val,
+                        Op::Sub => *lhs_val as f32 - rhs_val,
+                        Op::Mul => *lhs_val as f32 * rhs_val,
+                        Op::Div => *lhs_val as f32 / rhs_val,
+                        _ => panic!("Unsupported operation for constant folding: {:?}", bin_op),
+                    };
+                    Box::new(Literal::Float(result))
+                }
+            }
         } else {
             panic!("Non-constant folding operation: {:?}", node);
         }
@@ -70,41 +72,41 @@ pub fn fold(node: &Box<dyn Node>) -> Box<dyn Node> {
         let un_op = cast::<UnaryOp>(&*node).unwrap();
         let operand = fold(&un_op.operand);
 
-        if is::<Int>(&*operand) {
-            let operand_int = cast::<Int>(&*operand).unwrap();
-            let result = match un_op.op {
-                Op::Plus => operand_int.0,
-                Op::Minus => -operand_int.0,
-                _ => panic!(
-                    "Unsupported unary operation for constant folding: {:?}",
-                    un_op
-                ),
-            };
-            Box::new(Int(result))
-        } else if is::<Float>(&*operand) {
-            let operand_float = cast::<Float>(&*operand).unwrap();
-            let result = match un_op.op {
-                Op::Plus => operand_float.0,
-                Op::Minus => -operand_float.0,
-                _ => panic!(
-                    "Unsupported unary operation for constant folding: {:?}",
-                    un_op
-                ),
-            };
-            Box::new(Float(result))
+        if is::<Literal>(&*operand) {
+            let lit = cast::<Literal>(&*operand).unwrap();
+            match lit {
+                Literal::Int(val) => {
+                    let result = match un_op.op {
+                        Op::Plus => *val,
+                        Op::Minus => -val,
+                        _ => panic!(
+                            "Unsupported unary operation for constant folding: {:?}",
+                            un_op
+                        ),
+                    };
+                    Box::new(Literal::Int(result))
+                }
+                Literal::Float(val) => {
+                    let result = match un_op.op {
+                        Op::Plus => *val,
+                        Op::Minus => -val,
+                        _ => panic!(
+                            "Unsupported unary operation for constant folding: {:?}",
+                            un_op
+                        ),
+                    };
+                    Box::new(Literal::Float(result))
+                }
+            }
         } else {
             panic!("Non-constant folding unary operation: {:?}", node);
         }
-
-    } else if is::<Int>(node) {
-        // since we can't impl Clone for the fucking dyn Node, we have to reconstruct a new one.
-        let int_node = cast::<Int>(&*node).unwrap();
-        Box::new(Int(int_node.0))
-
-    } else if is::<Float>(node) {
-        let float_node = cast::<Float>(&*node).unwrap();
-        Box::new(Float(float_node.0))
-
+    } else if is::<Literal>(node) {
+        let lit_node = cast::<Literal>(&*node).unwrap();
+        match lit_node {
+            Literal::Int(val) => Box::new(Literal::Int(*val)),
+            Literal::Float(val) => Box::new(Literal::Float(*val)),
+        }
     } else {
         panic!("Unsupported node type for constant folding: {:?}", node);
     }
@@ -130,6 +132,7 @@ pub fn canonicalize(mut node: RawDecl) -> Vec<Box<dyn Node>> {
             let const_exps = raw_decl.const_exps.clone();
             // Flatten & Dispatch
             if node.mutable {
+                // We don't know whether the init_values is float or int, so we still wrap it with Node.
                 new_nodes.push(Box::new(ConstArray {
                     name: raw_decl.ident,
                     typ: Type::Array {
@@ -203,8 +206,8 @@ fn flatten<'a>(base_typ: Type, indices: Vec<u32>, node: Box<dyn Node>) -> Vec<Bo
                 // fill 0
                 (0..to_be_filled).for_each(|_| {
                     new_vals.borrow_mut().push(match base_typ.clone() {
-                        Type::Int => Box::new(Int(0)),
-                        Type::Float => Box::new(Float(0.0)),
+                        Type::Int => Box::new(Literal::Int(0)),
+                        Type::Float => Box::new(Literal::Float(0.0)),
                         _ => unreachable!(
                             "Only Int and Float types are supported in array initialization"
                         ),

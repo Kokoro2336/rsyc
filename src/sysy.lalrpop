@@ -1,7 +1,7 @@
-use crate::base::config::Type;
+use crate::base::r#type::Type;
 use crate::frontend::ast::*;
 use crate::frontend::parse::*;
-use crate::base::utils::{is, cast_deref};
+use crate::utils::{is, cast_deref};
 
 // lalrpop 里的约定
 grammar;
@@ -201,14 +201,17 @@ SimpleStmt: Box<dyn Node> = {
 
 LVal: Box<dyn Node> = {
   <ident: Ident> <exps: ("[" Exp "]")*> => {
+    // Dispatch VarAccess and ArrayAccess
     if exps.is_empty() {
       Box::new(VarAccess {
-        name: ident
+        name: ident,
+        typ: Type::Void,
       })
     } else {
       Box::new(ArrayAccess {
         name: ident,
         indices: exps.into_iter().map(|(_, exp, _)| exp).collect(),
+        typ: Type::Void,
       })
     }
   },
@@ -343,6 +346,7 @@ Exp: Box<dyn Node> = {
 LOrExp: Box<dyn Node> = {
   <lor_exp: LOrExp> <lor_op: LOrOp> <land_exp: LAndExp> => Box::new(
     BinaryOp { 
+      typ: Type::Void,
       lhs: lor_exp,
       op: lor_op,
       rhs: land_exp,
@@ -354,6 +358,7 @@ LOrExp: Box<dyn Node> = {
 LAndExp: Box<dyn Node> = {
   <land_exp: LAndExp> <land_op: LAndOp> <eq_exp: EqExp> => Box::new(
     BinaryOp { 
+      typ: Type::Void,
       lhs: land_exp, 
       op: land_op, 
       rhs: eq_exp 
@@ -365,6 +370,7 @@ LAndExp: Box<dyn Node> = {
 EqExp: Box<dyn Node> = {
   <eq_exp: EqExp> <eq_op: EqOp> <rel_exp: RelExp> => Box::new(
     BinaryOp { 
+      typ: Type::Void,
       lhs: eq_exp, 
       op: eq_op, 
       rhs: rel_exp 
@@ -376,6 +382,7 @@ EqExp: Box<dyn Node> = {
 RelExp: Box<dyn Node> = {
   <rel_exp: RelExp> <rel_op: RelOp> <add_exp: AddExp> => Box::new(
     BinaryOp { 
+      typ: Type::Void,
       lhs: rel_exp, 
       op: rel_op, 
       rhs: add_exp 
@@ -387,6 +394,7 @@ RelExp: Box<dyn Node> = {
 UnaryExp: Box<dyn Node> = {
   <unary_op: UnaryOp> <unary_exp: UnaryExp> => Box::new(
     UnaryOp { 
+      typ: Type::Void,
       op: unary_op, 
       operand: unary_exp 
     }
@@ -394,6 +402,7 @@ UnaryExp: Box<dyn Node> = {
   // function calling
   <ident: Ident> "(" <arg: Exp> <other_args: ("," Exp)*> ")" => Box::new(
     Call {
+      typ: Type::Void,
       func_name: ident,
       args: {
         let mut args_vec = vec![arg];
@@ -406,6 +415,7 @@ UnaryExp: Box<dyn Node> = {
   ),
   <ident: Ident> "(" ")" => Box::new(
     Call {
+      typ: Type::Void,
       func_name: ident,
       args: vec![],
     }
@@ -416,6 +426,7 @@ UnaryExp: Box<dyn Node> = {
 AddExp: Box<dyn Node> = {
   <add_exp: AddExp> <add_op: AddOp> <mul_exp: MulExp> => Box::new(
     BinaryOp { 
+      typ: Type::Void,
       lhs: add_exp, 
       op: add_op, 
       rhs: mul_exp
@@ -427,6 +438,7 @@ AddExp: Box<dyn Node> = {
 MulExp: Box<dyn Node> = {
   <mul_exp: MulExp> <mul_op: MulOp> <unary_exp: UnaryExp> => Box::new(
     BinaryOp { 
+      typ: Type::Void,
       lhs: mul_exp, 
       op: mul_op, 
       rhs: unary_exp 
@@ -479,8 +491,8 @@ AddOp: Op = {
 };
 
 Number: Box<dyn Node> = {
-  <int: IntConst> => Box::new(Int(int)),
-  <float: FloatConst> => Box::new(Float(float)),
+  <int: IntConst> => Literal::Int(int),
+  <float: FloatConst> => Literal::Float(float),
 }
 
 Ident: String = <s: r"[_a-zA-Z][_a-zA-Z0-9]*"> => {

@@ -84,12 +84,3 @@ impl IdAllocator {
         self.current_id
     }
 }
-
-thread_local! {
-    // initialize sc_var id allocator
-    pub static SC_VAR_ID_ALLOCATOR: RefCell<IdAllocator> = RefCell::new(IdAllocator::new());
-    // initialize koopa ir block id allocator
-    pub static BLOCK_ID_ALLOCATOR: RefCell<IdAllocator> = RefCell::new(IdAllocator::new());
-    // initialize ir inst id allocator
-    pub static IR_VAR_ID_ALLOCATOR: RefCell<IdAllocator> = RefCell::new(IdAllocator::new());
-}
