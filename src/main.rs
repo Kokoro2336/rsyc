@@ -9,6 +9,7 @@ mod frontend;
 mod base;
 mod opt;
 mod utils;
+mod log;
 use crate::frontend::ast::Node;
 
 // 引用 lalrpop 生成的解析器

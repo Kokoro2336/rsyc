@@ -2,4 +2,4 @@
 
 A rust-based SysY(Sub set of C) compiler.
 
-Building it for 2026 Compiler Design Competition.
+Building for [2026 CSCC Huawei Bisheng Compiler Competition](https://compiler.educg.net).
