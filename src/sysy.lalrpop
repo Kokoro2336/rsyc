@@ -110,8 +110,8 @@ FuncFParam: (String, Type) = {
         base: Box::new(param_type),
         dims: other_const_exps.into_iter().map(|(_, exp, _)| {
           // we only need the size info here, so we can assume the ConstExp is IntConst
-          if let Some(int_node) = exp.as_any().downcast_ref::<Int>() {
-            int_node.0 as u32
+          if let Literal::Int(int_node) = exp.as_any().downcast_ref::<Literal>().unwrap() {
+            *int_node as u32
           } else {
             panic!("Array size must be a constant integer: {:?}", exp);
           }
@@ -248,8 +248,8 @@ ConstDef: RawDef = {
     RawDef {
       ident,
       const_exps: const_exps.into_iter().map(|(_, exp, _)| 
-        if let Some(int_node) = exp.as_any().downcast_ref::<Int>() {
-          int_node.0 as u32
+        if let Literal::Int(int_node) = exp.as_any().downcast_ref::<Literal>().unwrap() {
+          *int_node as u32
         } else {
           panic!("Array size must be a constant integer: {:?}", exp);
         }
@@ -274,7 +274,7 @@ ConstInitVal: Box<dyn Node> = {
 ConstExp: Box<dyn Node> = {
   <exp: Exp> => {
     // do constant folding here
-    fold(&exp)
+    fold(exp)
   },
 }
 
@@ -303,8 +303,8 @@ VarDef: RawDef = {
   <ident: Ident> <const_exps: ("[" ConstExp "]")*> "=" <init_val: InitVal> => RawDef {
     ident, 
     const_exps: const_exps.into_iter().map(|(_, exp, _)| {
-      if let Some(int_node) = exp.as_any().downcast_ref::<Int>() {
-        int_node.0 as u32
+      if let Literal::Int(int_node) = exp.as_any().downcast_ref::<Literal>().unwrap() {
+        *int_node as u32
       } else {
         panic!("Array size must be a constant integer: {:?}", exp);
       }
@@ -314,8 +314,8 @@ VarDef: RawDef = {
   <ident: Ident> <const_exps: ("[" ConstExp "]")*> => RawDef { 
     ident, 
     const_exps: const_exps.into_iter().map(|(_, exp, _)| {
-      if let Some(int_node) = exp.as_any().downcast_ref::<Int>() {
-        int_node.0 as u32
+      if let Literal::Int(int_node) = exp.as_any().downcast_ref::<Literal>().unwrap() {
+        *int_node as u32
       } else {
         panic!("Array size must be a constant integer: {:?}", exp);
       }
@@ -491,8 +491,8 @@ AddOp: Op = {
 };
 
 Number: Box<dyn Node> = {
-  <int: IntConst> => Literal::Int(int),
-  <float: FloatConst> => Literal::Float(float),
+  <int: IntConst> => Box::new(Literal::Int(int)),
+  <float: FloatConst> => Box::new(Literal::Float(float)),
 }
 
 Ident: String = <s: r"[_a-zA-Z][_a-zA-Z0-9]*"> => {

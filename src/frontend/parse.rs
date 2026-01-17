@@ -1,9 +1,9 @@
 use crate::base::r#type::Type;
-use crate::utils::{cast, cast_deref, is};
 use crate::frontend::ast::*;
+use crate::log::{error, info};
+use crate::utils::{cast, cast_deref, is};
 
 use std::cell::RefCell;
-use std::rc::Rc;
 use tool::fix;
 
 /**
@@ -12,12 +12,11 @@ use tool::fix;
 use crate::frontend::ast::{BinaryOp, Literal, Node, Op, UnaryOp};
 
 // early constant folding optimization
-pub fn fold(node: &Box<dyn Node>) -> Box<dyn Node> {
-    if is::<BinaryOp>(node) {
-        let bin_op = cast::<BinaryOp>(&*node).unwrap();
-        let lhs = fold(&bin_op.lhs);
-        let rhs = fold(&bin_op.rhs);
-
+pub fn fold(node: Box<dyn Node>) -> Box<dyn Node> {
+    if is::<BinaryOp>(&*node) {
+        let bin_op = cast_deref::<BinaryOp>(node).unwrap();
+        let lhs = fold(bin_op.lhs);
+        let rhs = fold(bin_op.rhs);
         if is::<Literal>(&*lhs) && is::<Literal>(&*rhs) {
             let lhs_lit = cast::<Literal>(&*lhs).unwrap();
             let rhs_lit = cast::<Literal>(&*rhs).unwrap();
@@ -30,7 +29,10 @@ pub fn fold(node: &Box<dyn Node>) -> Box<dyn Node> {
                         Op::Mul => lhs_val * rhs_val,
                         Op::Div => lhs_val / rhs_val,
                         Op::Mod => lhs_val % rhs_val,
-                        _ => panic!("Unsupported operation for constant folding: {:?}", bin_op),
+                        _ => panic!(
+                            "Unsupported operation for constant folding: {:?}",
+                            bin_op.op
+                        ),
                     };
                     Box::new(Literal::Int(result))
                 }
@@ -40,7 +42,10 @@ pub fn fold(node: &Box<dyn Node>) -> Box<dyn Node> {
                         Op::Sub => lhs_val - rhs_val,
                         Op::Mul => lhs_val * rhs_val,
                         Op::Div => lhs_val / rhs_val,
-                        _ => panic!("Unsupported operation for constant folding: {:?}", bin_op),
+                        _ => panic!(
+                            "Unsupported operation for constant folding: {:?}",
+                            bin_op.op
+                        ),
                     };
                     Box::new(Literal::Float(result))
                 }
@@ -50,7 +55,10 @@ pub fn fold(node: &Box<dyn Node>) -> Box<dyn Node> {
                         Op::Sub => lhs_val - *rhs_val as f32,
                         Op::Mul => lhs_val * *rhs_val as f32,
                         Op::Div => lhs_val / *rhs_val as f32,
-                        _ => panic!("Unsupported operation for constant folding: {:?}", bin_op),
+                        _ => panic!(
+                            "Unsupported operation for constant folding: {:?}",
+                            bin_op.op
+                        ),
                     };
                     Box::new(Literal::Float(result))
                 }
@@ -60,17 +68,20 @@ pub fn fold(node: &Box<dyn Node>) -> Box<dyn Node> {
                         Op::Sub => *lhs_val as f32 - rhs_val,
                         Op::Mul => *lhs_val as f32 * rhs_val,
                         Op::Div => *lhs_val as f32 / rhs_val,
-                        _ => panic!("Unsupported operation for constant folding: {:?}", bin_op),
+                        _ => panic!(
+                            "Unsupported operation for constant folding: {:?}",
+                            bin_op.op
+                        ),
                     };
                     Box::new(Literal::Float(result))
                 }
             }
         } else {
-            panic!("Non-constant folding operation: {:?}", node);
+            panic!("Non-constant folding operation: {:?}", bin_op.op);
         }
-    } else if is::<UnaryOp>(node) {
-        let un_op = cast::<UnaryOp>(&*node).unwrap();
-        let operand = fold(&un_op.operand);
+    } else if is::<UnaryOp>(&*node) {
+        let un_op = cast_deref::<UnaryOp>(node).unwrap();
+        let operand = fold(un_op.operand);
 
         if is::<Literal>(&*operand) {
             let lit = cast::<Literal>(&*operand).unwrap();
@@ -81,7 +92,7 @@ pub fn fold(node: &Box<dyn Node>) -> Box<dyn Node> {
                         Op::Minus => -val,
                         _ => panic!(
                             "Unsupported unary operation for constant folding: {:?}",
-                            un_op
+                            un_op.op
                         ),
                     };
                     Box::new(Literal::Int(result))
@@ -92,23 +103,29 @@ pub fn fold(node: &Box<dyn Node>) -> Box<dyn Node> {
                         Op::Minus => -val,
                         _ => panic!(
                             "Unsupported unary operation for constant folding: {:?}",
-                            un_op
+                            un_op.op
                         ),
                     };
                     Box::new(Literal::Float(result))
                 }
             }
         } else {
-            panic!("Non-constant folding unary operation: {:?}", node);
+            panic!("Non-constant folding unary operation: {:?}", un_op.op);
         }
-    } else if is::<Literal>(node) {
+    } else if is::<Literal>(&*node) {
         let lit_node = cast::<Literal>(&*node).unwrap();
         match lit_node {
             Literal::Int(val) => Box::new(Literal::Int(*val)),
             Literal::Float(val) => Box::new(Literal::Float(*val)),
         }
+    } else if is::<Call>(&*node) {
+        // TODO: Maybe we can fold some intrinsic functions like sin, cos, etc.
+        node
+    } else if is::<VarAccess>(&*node) || is::<ArrayAccess>(&*node) {
+        // TODO: Add syms for parsing, and then we can do constant folding here.
+        node
     } else {
-        panic!("Unsupported node type for constant folding: {:?}", node);
+        error!("Unsupported node type for constant folding: {:?}", node);
     }
 }
 
@@ -132,22 +149,6 @@ pub fn canonicalize(mut node: RawDecl) -> Vec<Box<dyn Node>> {
             let const_exps = raw_decl.const_exps.clone();
             // Flatten & Dispatch
             if node.mutable {
-                // We don't know whether the init_values is float or int, so we still wrap it with Node.
-                new_nodes.push(Box::new(ConstArray {
-                    name: raw_decl.ident,
-                    typ: Type::Array {
-                        base: Box::new(aggr_typ.clone()),
-                        dims: raw_decl.const_exps,
-                    },
-                    init_values: flatten(
-                        aggr_typ.clone(),
-                        const_exps,
-                        raw_decl
-                            .init_val
-                            .expect("ConstArray should have an initial value!"),
-                    ),
-                }));
-            } else {
                 new_nodes.push(Box::new(LocalArray {
                     name: raw_decl.ident,
                     typ: Type::Array {
@@ -164,6 +165,22 @@ pub fn canonicalize(mut node: RawDecl) -> Vec<Box<dyn Node>> {
                         ))
                     },
                 }));
+            } else {
+                // We don't know whether the init_values is float or int, so we still wrap it with Node.
+                new_nodes.push(Box::new(ConstArray {
+                    name: raw_decl.ident,
+                    typ: Type::Array {
+                        base: Box::new(aggr_typ.clone()),
+                        dims: raw_decl.const_exps,
+                    },
+                    init_values: flatten(
+                        aggr_typ.clone(),
+                        const_exps,
+                        raw_decl
+                            .init_val
+                            .expect("ConstArray should have an initial value!"),
+                    ),
+                }));
             }
         }
     }
@@ -171,7 +188,7 @@ pub fn canonicalize(mut node: RawDecl) -> Vec<Box<dyn Node>> {
     new_nodes
 }
 
-fn flatten<'a>(base_typ: Type, indices: Vec<u32>, node: Box<dyn Node>) -> Vec<Box<dyn Node>> {
+fn flatten(base_typ: Type, indices: Vec<u32>, node: Box<dyn Node>) -> Vec<Box<dyn Node>> {
     if !is::<ArrayInitVal>(&*node) {
         panic!("flatten can only process ArrayInitVal nodes");
     }
@@ -184,9 +201,19 @@ fn flatten<'a>(base_typ: Type, indices: Vec<u32>, node: Box<dyn Node>) -> Vec<Bo
             let mut filled_size: u32 = 0;
 
             // find minimal depth of current array.
-            if is::<ArrayInitVal>(&val) {
+            if is::<ArrayInitVal>(&*val) {
+                info!("Catch ArrayInitVal at depth {}", depth);
                 if new_vals.borrow().len() as u32 % indices.last().unwrap() != 0 {
                     panic!("Array has insufficient initializers");
+                }
+
+                let mut acc = 1;
+                let mut idx = indices.len();
+                for index in indices.iter().skip(depth as usize).rev() {
+                    acc *= *index as usize;
+                    if new_vals.borrow().len() % acc == 0 {
+                        idx -= 1;
+                    }
                 }
 
                 let array_init_val = *cast_deref::<ArrayInitVal>(val).unwrap();
@@ -197,11 +224,8 @@ fn flatten<'a>(base_typ: Type, indices: Vec<u32>, node: Box<dyn Node>) -> Vec<Bo
 
                 filled_size += sub_filled_size;
 
-                let to_be_filled = indices[depth as usize..indices.len()]
-                    .iter()
-                    .fold(1, |acc, index| acc * (*index as usize))
-                    as u32
-                    - filled_size;
+                let to_be_filled =
+                    indices[idx..indices.len()].iter().product::<u32>() - filled_size;
 
                 // fill 0
                 (0..to_be_filled).for_each(|_| {
@@ -223,17 +247,20 @@ fn flatten<'a>(base_typ: Type, indices: Vec<u32>, node: Box<dyn Node>) -> Vec<Bo
             filled_size
         });
 
+        info!("\nOrigial ArrayInitVal: {:?}", &node);
         rec((node, 0));
     }
 
     let expected_size = indices.iter().fold(1, |acc, index| acc * (*index as usize));
     if new_vals.borrow().len() != expected_size {
-        panic!(
-            "Array has insufficient initializers: expected {}, found {}",
+        error!(
+            "Array has insufficient initializers: expected {}, found {}. \nFlattened values: {:?}",
             expected_size,
-            new_vals.borrow().len()
+            new_vals.borrow().len(),
+            new_vals.borrow()
         );
     }
 
+    info!("Successfully flattened array: {:?}", new_vals.borrow());
     new_vals.into_inner()
 }

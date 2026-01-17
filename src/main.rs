@@ -2,15 +2,19 @@ use clap::Parser;
 use lalrpop_util::lalrpop_mod;
 use std::fs::read_to_string;
 use std::io::{Result, Write};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 mod asm;
-mod frontend;
 mod base;
+mod frontend;
+mod log;
 mod opt;
 mod utils;
-mod log;
 use crate::frontend::ast::Node;
+use crate::log::setup;
+
+use log::info;
 
 // 引用 lalrpop 生成的解析器
 // 因为我们刚刚创建了 sysy.lalrpop, 所以模块名是 sysy
@@ -37,6 +41,13 @@ struct Cli {
 }
 
 fn main() -> Result<()> {
+    // setup logging
+    // the path is relative to the root dir of the project.
+    let path = PathBuf::from("./logs/rsyc.log");
+    // We need to keep this guard alive for the entire duration of the program.
+    let _guard = setup(path);
+    info!("Logger initialized.");
+
     // preprocess argv so single-dash long-style `-koopa` becomes `--koopa`
     let args = std::env::args_os()
         .enumerate()
@@ -65,5 +76,6 @@ fn main() -> Result<()> {
 
     // 调用 lalrpop 生成的 parser 解析输入文件
     let result = sysy::CompUnitParser::new().parse(&input);
+    info!("\nParsed result: {:#?}", result);
     Ok(())
 }
