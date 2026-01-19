@@ -4,7 +4,7 @@ use crate::base::ir::Program;
  * Faster retrieval by index compared to HashMap.
  */
 use crate::base::Pass;
-use crate::log::error;
+use crate::debug::error;
 
 pub trait Arena<T> {
     fn remove(&mut self, idx: usize) -> Result<usize, String>;

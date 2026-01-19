@@ -16,3 +16,6 @@ testcases/**
 .idea/**
 .bash_history
 gdb_log.txt
+graphs/
+graphs/*
+graphs/**

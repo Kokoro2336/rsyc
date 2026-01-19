@@ -6,17 +6,17 @@ use std::path::PathBuf;
 
 mod asm;
 mod base;
+mod debug;
 mod frontend;
-mod log;
 mod opt;
 mod utils;
 use crate::base::Pass;
+use crate::debug::setup;
 use crate::frontend::ast::Node;
 use crate::frontend::semantic::Semantic;
-use crate::log::setup;
 
-use log::graph::{dump_graph, GraphNode};
-use log::info;
+use debug::graph::{dump_graph, GraphNode};
+use debug::info;
 
 // 引用 lalrpop 生成的解析器
 // 因为我们刚刚创建了 sysy.lalrpop, 所以模块名是 sysy
@@ -86,7 +86,7 @@ fn main() -> Result<()> {
     info!("Finish Semantic Analysis");
 
     // Try to dump graph to log file
-    dump_graph(true, &*result);
+    dump_graph(true, &*result, "ast");
 
     Ok(())
 }

@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::vec::Vec;
 
 use crate::base::ir::BBId;
-use crate::log::error;
+use crate::debug::error;
 use crate::utils::arena::*;
 
 pub type OpId = usize;

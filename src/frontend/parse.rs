@@ -1,6 +1,6 @@
 use crate::base::r#type::Type;
 use crate::frontend::ast::*;
-use crate::log::{error, info};
+use crate::debug::{error, info};
 use crate::utils::{cast, cast_deref, is};
 
 use std::cell::RefCell;
