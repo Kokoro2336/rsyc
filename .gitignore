@@ -1,7 +1,7 @@
 /target
-log/
-log/*
-log/**
+logs/
+logs/*
+logs/**
 test/
 test/*
 test/**

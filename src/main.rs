@@ -1,17 +1,22 @@
 use clap::Parser;
 use lalrpop_util::lalrpop_mod;
 use std::fs::read_to_string;
-use std::io::{Result, Write};
-use std::rc::Rc;
+use std::io::Result;
+use std::path::PathBuf;
 
 mod asm;
-mod sc;
-mod global;
-mod ir;
-mod util;
-use crate::asm::rv::Asm;
-use crate::asm::context::ASM_CONTEXT;
-use crate::global::context::SC_CONTEXT_STACK;
+mod base;
+mod frontend;
+mod log;
+mod opt;
+mod utils;
+use crate::base::Pass;
+use crate::frontend::ast::Node;
+use crate::frontend::semantic::Semantic;
+use crate::log::setup;
+
+use log::graph::{dump_graph, GraphNode};
+use log::info;
 
 // 引用 lalrpop 生成的解析器
 // 因为我们刚刚创建了 sysy.lalrpop, 所以模块名是 sysy
@@ -38,6 +43,11 @@ struct Cli {
 }
 
 fn main() -> Result<()> {
+    // setup logging
+    // We need to keep this guard alive for the entire duration of the program.
+    let _guard = setup("parse.log");
+    info!("Logger initialized.");
+
     // preprocess argv so single-dash long-style `-koopa` becomes `--koopa`
     let args = std::env::args_os()
         .enumerate()
@@ -65,51 +75,18 @@ fn main() -> Result<()> {
     let input = read_to_string(input)?;
 
     // 调用 lalrpop 生成的 parser 解析输入文件
-    let result = sysy::CompUnitParser::new().parse(&input);
-    let ast = Rc::new(match result {
-        Ok(ast_result) => ast_result,
-        Err(e) => {
-            panic!("Error during parsing: {:?}", e);
-        }
-    });
+    let mut result = sysy::CompUnitParser::new().parse(&input).unwrap();
+    info!("\nParsed result: {:#?}", result);
 
-    SC_CONTEXT_STACK.with(|stack| {
-        stack
-            .borrow_mut()
-            .set_comp_unit(Rc::clone(&ast));
-    });
-
-    let koopa = if cli.koopa || cli.riscv {
-        // generate Koopa IR
-        let res = ast.parse();
-        println!("Finish IR Generation.");
-        res
-    } else {
-        panic!("No flag specified: require -koopa or -riscv");
-    };
-
-    ASM_CONTEXT.with(|asm_cxt| asm_cxt.borrow_mut().set_program(koopa.clone()));
-
-    let asm: Option<Asm> = if cli.riscv {
-        // generate RISC-V asm
-        let res = Asm::from(&koopa.clone());
-        println!("Finish Asm Generation.");
-        Some(res)
-    } else {
-        None
-    };
-
-    // output the koopa
-    let mut f = std::fs::File::create(output.clone())?;
-    // output the koopa ir
-    f.write_all(format!("{}", koopa).as_bytes())?;
-
-    // output the asm
-    if let Some(asm) = asm {
-        let mut f = std::fs::File::create(output.clone())?;
-        // output the riscv asm
-        f.write_all(format!("{}", asm).as_bytes())?;
+    info!("Start Semantic Analysis.");
+    {
+        let mut pass: Box<dyn Pass> = Box::new(Semantic::new(&mut result));
+        pass.run();
     }
+    info!("Finish Semantic Analysis");
+
+    // Try to dump graph to log file
+    dump_graph(true, &*result);
 
     Ok(())
 }

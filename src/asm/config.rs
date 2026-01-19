@@ -6,7 +6,7 @@ pub const RISCV_BITS: u32 = 32;
 pub const REG_PARAMS_MAX_NUM: u32 = 8;
 
 #[derive(Clone, Debug)]
-pub enum RVOpCode {
+pub enum RVOp {
     BEQZ,
     BNEZ,
     J,
@@ -38,38 +38,38 @@ pub enum RVOpCode {
     MV,
 }
 
-impl std::fmt::Display for RVOpCode {
+impl std::fmt::Display for RVOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RVOpCode::BEQZ => write!(f, "beqz"),
-            RVOpCode::BNEZ => write!(f, "bnez"),
-            RVOpCode::J => write!(f, "j"),
-            RVOpCode::CALL => write!(f, "call"),
-            RVOpCode::RET => write!(f, "ret"),
-            RVOpCode::LW => write!(f, "lw"),
-            RVOpCode::SW => write!(f, "sw"),
-            RVOpCode::ADD => write!(f, "add"),
-            RVOpCode::ADDI => write!(f, "addi"),
-            RVOpCode::SUB => write!(f, "sub"),
-            RVOpCode::SLT => write!(f, "slt"),
-            RVOpCode::SGT => write!(f, "sgt"),
-            RVOpCode::SEQZ => write!(f, "seqz"),
-            RVOpCode::SNEZ => write!(f, "snez"),
-            RVOpCode::XOR => write!(f, "xor"),
-            RVOpCode::XORI => write!(f, "xori"),
-            RVOpCode::OR => write!(f, "or"),
-            RVOpCode::ORI => write!(f, "ori"),
-            RVOpCode::AND => write!(f, "and"),
-            RVOpCode::ANDI => write!(f, "andi"),
-            RVOpCode::SLL => write!(f, "sll"),
-            RVOpCode::SRL => write!(f, "srl"),
-            RVOpCode::SRA => write!(f, "sra"),
-            RVOpCode::MUL => write!(f, "mul"),
-            RVOpCode::DIV => write!(f, "div"),
-            RVOpCode::REM => write!(f, "rem"),
-            RVOpCode::LI => write!(f, "li"),
-            RVOpCode::LA => write!(f, "la"),
-            RVOpCode::MV => write!(f, "mv"),
+            RVOp::BEQZ => write!(f, "beqz"),
+            RVOp::BNEZ => write!(f, "bnez"),
+            RVOp::J => write!(f, "j"),
+            RVOp::CALL => write!(f, "call"),
+            RVOp::RET => write!(f, "ret"),
+            RVOp::LW => write!(f, "lw"),
+            RVOp::SW => write!(f, "sw"),
+            RVOp::ADD => write!(f, "add"),
+            RVOp::ADDI => write!(f, "addi"),
+            RVOp::SUB => write!(f, "sub"),
+            RVOp::SLT => write!(f, "slt"),
+            RVOp::SGT => write!(f, "sgt"),
+            RVOp::SEQZ => write!(f, "seqz"),
+            RVOp::SNEZ => write!(f, "snez"),
+            RVOp::XOR => write!(f, "xor"),
+            RVOp::XORI => write!(f, "xori"),
+            RVOp::OR => write!(f, "or"),
+            RVOp::ORI => write!(f, "ori"),
+            RVOp::AND => write!(f, "and"),
+            RVOp::ANDI => write!(f, "andi"),
+            RVOp::SLL => write!(f, "sll"),
+            RVOp::SRL => write!(f, "srl"),
+            RVOp::SRA => write!(f, "sra"),
+            RVOp::MUL => write!(f, "mul"),
+            RVOp::DIV => write!(f, "div"),
+            RVOp::REM => write!(f, "rem"),
+            RVOp::LI => write!(f, "li"),
+            RVOp::LA => write!(f, "la"),
+            RVOp::MV => write!(f, "mv"),
         }
     }
 }
@@ -94,7 +94,7 @@ pub enum RVRegCode {
     A4 = 14,
     A5 = 15,
     A6 = 16,
-    A7 = 17, // function arguments / return values
+    A7 = 17, // FnDecl arguments / return values
     S2 = 18,
     S3 = 19,
     S4 = 20,
@@ -162,7 +162,7 @@ impl RVOperandType {
         }
     }
 
-    /// this function would only free temporary registers.
+    /// this FnDecl would only free temporary registers.
     pub fn free_temp(&self) {
         match self {
             RVOperandType::Temp(reg) => {
