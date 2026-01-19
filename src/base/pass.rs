@@ -2,7 +2,7 @@ use std::any::Any;
 use std::collections::HashMap;
 
 pub trait Pass {
-    fn run(&mut self);
+    fn run(&mut self) -> Result<(), String>;
 }
 
 pub struct SymbolTable<T, U> {

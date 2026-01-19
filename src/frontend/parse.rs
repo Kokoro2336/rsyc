@@ -119,7 +119,7 @@ pub fn fold(node: Box<dyn Node>) -> Box<dyn Node> {
             Literal::Float(val) => Box::new(Literal::Float(*val)),
         }
     } else if is::<Call>(&*node) {
-        // TODO: Maybe we can fold some intrinsic functions like sin, cos, etc.
+        // TODO: Maybe we can fold some intrinsic FnDecls like sin, cos, etc.
         node
     } else if is::<VarAccess>(&*node) || is::<ArrayAccess>(&*node) {
         // TODO: Add syms for parsing, and then we can do constant folding here.

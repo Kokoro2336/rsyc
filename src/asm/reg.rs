@@ -54,7 +54,7 @@ impl RVRegAllocator {
         if let Some(reg) = self.find_free_param_reg() {
             self.occupy_reg(reg, inst_id);
             // param reg don't need to be perm,
-            // cause they would be restore soon after function call,
+            // cause they would be restore soon after FnDecl call,
             // which is all executed in one inst: KoopaOpCode::CALL
             RVOperandType::Temp(reg)
         } else {

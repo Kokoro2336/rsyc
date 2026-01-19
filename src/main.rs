@@ -1,7 +1,7 @@
 use clap::Parser;
 use lalrpop_util::lalrpop_mod;
 use std::fs::read_to_string;
-use std::io::{Result};
+use std::io::Result;
 use std::path::PathBuf;
 
 mod asm;
@@ -10,10 +10,12 @@ mod frontend;
 mod log;
 mod opt;
 mod utils;
+use crate::base::Pass;
+use crate::frontend::ast::Node;
 use crate::frontend::semantic::Semantic;
-use crate::base::pass::Pass;
 use crate::log::setup;
 
+use log::graph::{dump_graph, GraphNode};
 use log::info;
 
 // 引用 lalrpop 生成的解析器
@@ -42,10 +44,8 @@ struct Cli {
 
 fn main() -> Result<()> {
     // setup logging
-    // the path is relative to the root dir of the project.
-    let path = PathBuf::from("./logs/rsyc.log");
     // We need to keep this guard alive for the entire duration of the program.
-    let _guard = setup(path);
+    let _guard = setup("parse.log");
     info!("Logger initialized.");
 
     // preprocess argv so single-dash long-style `-koopa` becomes `--koopa`
@@ -79,9 +79,14 @@ fn main() -> Result<()> {
     info!("\nParsed result: {:#?}", result);
 
     info!("Start Semantic Analysis.");
-    let mut pass: Box<dyn Pass> = Box::new(Semantic::new(&mut result));
-    pass.run();
+    {
+        let mut pass: Box<dyn Pass> = Box::new(Semantic::new(&mut result));
+        pass.run();
+    }
     info!("Finish Semantic Analysis");
+
+    // Try to dump graph to log file
+    dump_graph(true, &*result);
 
     Ok(())
 }

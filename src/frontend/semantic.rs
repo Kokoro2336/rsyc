@@ -2,7 +2,7 @@
  * Semantic analysis.
  * Performs type inference, add implicit cast and checks for semantic errors.
  */
-use crate::base::pass::{Pass, SymbolTable};
+use crate::base::{Pass, SymbolTable};
 use crate::base::r#type::Type;
 use crate::frontend::ast::*;
 use crate::utils::{cast, cast_mut, is, replace, take};
@@ -126,7 +126,7 @@ impl<'a> Semantic<'a> {
                 call.typ = func_type.clone();
                 func_type.clone()
             } else {
-                panic!("Undefined function: {}", call.func_name);
+                panic!("Undefined FnDecl: {}", call.func_name);
             }
         } else if is::<ArrayAccess>(node) {
             let array_access = cast_mut::<ArrayAccess>(node).unwrap();
@@ -155,8 +155,8 @@ impl<'a> Semantic<'a> {
             array_access.typ.clone()
 
         // Declarations
-        } else if is::<Function>(node) {
-            let func = cast_mut::<Function>(node).unwrap();
+        } else if is::<FnDecl>(node) {
+            let func = cast_mut::<FnDecl>(node).unwrap();
             self.syms
                 .insert(func.name.clone(), func.return_type.clone());
             self.analyze(&mut func.body);
@@ -309,9 +309,10 @@ impl<'a> Semantic<'a> {
 }
 
 impl<'a> Pass for Semantic<'a> {
-    fn run(&mut self) {
+    fn run(&mut self) -> Result<(), String> {
         let node = self.node.take().unwrap();
         self.analyze(node);
+        Ok(())
     }
 }
 

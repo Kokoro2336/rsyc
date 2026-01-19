@@ -1,14 +1,15 @@
 use std::any::Any;
 
 use crate::base::r#type::Type;
+use crate::log::graph::GraphNode;
 
 // We can't impl Clone for dyn Node, because Clone return self, and self it's unknown at compile time.
-pub trait Node: Any + std::fmt::Debug {
+pub trait Node: Any + std::fmt::Debug + GraphNode {
     fn as_any(&self) -> &dyn Any;
 }
 
 #[derive(Debug)]
-pub struct Function {
+pub struct FnDecl {
     pub name: String,
     pub params: Vec<(String, Type)>,
     pub return_type: Type,
@@ -17,8 +18,10 @@ pub struct Function {
 
 #[derive(Debug)]
 pub struct Break();
+
 #[derive(Debug)]
 pub struct Continue();
+
 #[derive(Debug)]
 pub struct Return(pub Option<Box<dyn Node>>);
 
@@ -179,7 +182,7 @@ macro_rules! impl_node {
 }
 
 impl_node!(
-    Function,
+    FnDecl,
     Block,
     Break,
     Continue,
@@ -196,13 +199,10 @@ impl_node!(
     Assign,
     If,
     While,
-
     Literal,
-
     DeclAggr,
     RawDecl,
     RawDef,
-
     ArrayInitVal
 );
 

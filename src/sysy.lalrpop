@@ -51,7 +51,7 @@ FuncDef: Box<dyn Node> = {
   <b_type: BType> <ident: Ident> "(" <func_fparams: FuncFParams> ")" <block: Block> => {
     // construct FuncDef struct, using shorthand <> to pass all named fields
     Box::new(
-      Function { 
+      FnDecl { 
         name: ident,
         params: func_fparams,
         body: block,
@@ -62,7 +62,7 @@ FuncDef: Box<dyn Node> = {
   // case with no parameters
   <b_type: BType> <ident: Ident> "(" ")" <block: Block> => {
     Box::new(
-      Function { 
+      FnDecl { 
         name: ident,
         params: vec![],
         body: block,
@@ -72,7 +72,7 @@ FuncDef: Box<dyn Node> = {
   },
   "void" <ident: Ident> "(" <func_fparams: FuncFParams> ")" <block: Block> => {
     Box::new(
-      Function { 
+      FnDecl { 
         name: ident,
         params: func_fparams,
         body: block,
@@ -82,7 +82,7 @@ FuncDef: Box<dyn Node> = {
   },
   "void" <ident: Ident> "(" ")" <block: Block> => {
     Box::new(
-      Function { 
+      FnDecl { 
         name: ident,
         params: vec![],
         body: block,
@@ -399,7 +399,7 @@ UnaryExp: Box<dyn Node> = {
       operand: unary_exp 
     }
   ),
-  // function calling
+  // FnDecl calling
   <ident: Ident> "(" <arg: Exp> <other_args: ("," Exp)*> ")" => Box::new(
     Call {
       typ: Type::Void,
