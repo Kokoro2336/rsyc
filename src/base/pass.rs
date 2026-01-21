@@ -1,8 +1,8 @@
 use std::any::Any;
 use std::collections::HashMap;
 
-pub trait Pass {
-    fn run(&mut self) -> Result<(), String>;
+pub trait Pass<T> {
+    fn run(&mut self) -> Result<T, String>;
 }
 
 pub struct SymbolTable<T, U> {

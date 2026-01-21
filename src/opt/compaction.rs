@@ -12,7 +12,7 @@ impl<'a> Compaction<'a> {
     }
 }
 
-impl<'a> Pass for Compaction<'a> {
+impl<'a> Pass<()> for Compaction<'a> {
     fn run(&mut self) -> Result<(), String> {
         self.program.funcs.iter_mut().try_for_each(|func| {
             let old_arena_dfg = func.dfg.gc()?;

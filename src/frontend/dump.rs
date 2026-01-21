@@ -541,7 +541,7 @@ impl GraphNode for ConstArray {
     }
 }
 
-impl GraphNode for LocalArray {
+impl GraphNode for VarArray {
     fn visit(
         &self,
         stmts: &mut Vec<Stmt>,
@@ -556,7 +556,7 @@ impl GraphNode for LocalArray {
             graph::NodeId(Id::Plain(format!("\"{}\"", ptr)), None),
             vec![
                 attr!("label", {
-                    format!("\"LocalArray: {} | Type: {}\"", self.name, self.typ)
+                    format!("\"VarArray: {} | Type: {} | is_global: {}\"", self.name, self.typ, self.is_global)
                 }),
                 attr!("shape", "box"),
             ],

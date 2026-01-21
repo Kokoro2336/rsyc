@@ -1,31 +1,33 @@
+use crate::base::r#type::Type;
 /**
  * Semantic analysis.
  * Performs type inference, add implicit cast and checks for semantic errors.
  */
 use crate::base::{Pass, SymbolTable};
-use crate::base::r#type::Type;
 use crate::frontend::ast::*;
-use crate::utils::{cast, cast_mut, is, replace, take};
+use crate::utils::{cast, cast_deref, cast_mut, is, replace, take};
 
 pub struct Semantic<'a> {
     pub syms: SymbolTable<String, Type>,
-    pub node: Option<&'a mut Box<dyn Node>>,
+    pub consts: SymbolTable<String, &'a Box<dyn Node>>,
+    pub node: Option<Box<dyn Node>>,
 }
 
 impl<'a> Semantic<'a> {
-    pub fn new(node: &'a mut Box<dyn Node>) -> Semantic<'a> {
-        Semantic {
+    pub fn new(node: Box<dyn Node>) -> Self {
+        Self {
             syms: SymbolTable::new(),
+            consts: SymbolTable::new(),
             node: Some(node),
         }
     }
 
-    pub fn analyze(&mut self, node: &mut Box<dyn Node>) -> Type {
+    pub fn analyze(&mut self, node: &mut Box<dyn Node>) -> Result<Type, String> {
         // Exps
         if is::<BinaryOp>(node) {
             let bin_op = cast_mut::<BinaryOp>(node).unwrap();
-            let lhs_type = self.analyze(&mut bin_op.lhs);
-            let rhs_type = self.analyze(&mut bin_op.rhs);
+            let lhs_type = self.analyze(&mut bin_op.lhs)?;
+            let rhs_type = self.analyze(&mut bin_op.rhs)?;
 
             // And & Or
             if matches!(lhs_type, Type::Float) {
@@ -65,20 +67,20 @@ impl<'a> Semantic<'a> {
             // if the operation doesn't allow float return type, directly return Int
             if bin_op.op.only_ret_int() {
                 bin_op.typ = Type::Int;
-                Type::Int
+                Ok(Type::Int)
             } else if matches!(lhs_type, Type::Float) || matches!(rhs_type, Type::Float) {
                 bin_op.typ = Type::Float;
-                Type::Float
+                Ok(Type::Float)
             } else {
                 bin_op.typ = Type::Int;
-                Type::Int
+                Ok(Type::Int)
             }
         } else if is::<UnaryOp>(node) {
             let un_op = cast_mut::<UnaryOp>(node).unwrap();
             if matches!(un_op.op, Op::Cast(_, _)) {
                 panic!("Cast op is impossible to occur before semantic analysis!");
             }
-            let operand_type = self.analyze(&mut un_op.operand);
+            let operand_type = self.analyze(&mut un_op.operand)?;
 
             // Insert Ne for float
             match un_op.op {
@@ -86,11 +88,11 @@ impl<'a> Semantic<'a> {
                     // remove the plus node
                     let operand = take(&mut un_op.operand);
                     replace(node, operand);
-                    operand_type
+                    Ok(operand_type)
                 }
                 Op::Minus => {
                     // Minus always returns the same type as operand
-                    operand_type
+                    Ok(operand_type)
                 }
                 Op::Not => {
                     // Insert Ne for float
@@ -102,21 +104,21 @@ impl<'a> Semantic<'a> {
                             rhs: Box::new(Literal::Float(0.0)),
                         });
                     }
-                    Type::Int
+                    Ok(Type::Int)
                 }
                 _ => unreachable!("Unexpected unary op: {:?}", un_op),
             }
         } else if is::<Literal>(node) {
             let lit = cast_mut::<Literal>(node).unwrap();
-            match lit {
-                Literal::Int(_) => Type::Int,
-                Literal::Float(_) => Type::Float,
+            match *lit {
+                Literal::Int(_) => Ok(Type::Int),
+                Literal::Float(_) => Ok(Type::Float),
             }
         } else if is::<VarAccess>(node) {
             let var_access = cast_mut::<VarAccess>(node).unwrap();
             if let Some(var_type) = self.syms.get(&var_access.name) {
                 var_access.typ = var_type.clone();
-                var_type.clone()
+                Ok(var_type.clone())
             } else {
                 panic!("Undefined variable: {}", var_access.name);
             }
@@ -124,7 +126,7 @@ impl<'a> Semantic<'a> {
             let call = cast_mut::<Call>(node).unwrap();
             if let Some(func_type) = self.syms.get(&call.func_name) {
                 call.typ = func_type.clone();
-                func_type.clone()
+                Ok(func_type.clone())
             } else {
                 panic!("Undefined FnDecl: {}", call.func_name);
             }
@@ -147,12 +149,12 @@ impl<'a> Semantic<'a> {
                     })
                 }
             } else {
-                panic!(
+                return Err(format!(
                     "Variable {} is not an array, cannot access with indices",
                     array_access.name
-                );
+                ));
             };
-            array_access.typ.clone()
+            Ok(array_access.typ.clone())
 
         // Declarations
         } else if is::<FnDecl>(node) {
@@ -161,13 +163,13 @@ impl<'a> Semantic<'a> {
                 .insert(func.name.clone(), func.return_type.clone());
             self.analyze(&mut func.body);
             self.syms.exit_scope();
-            Type::Void
+            Ok(Type::Void)
         } else if is::<VarDecl>(node) {
             let var_decl = cast_mut::<VarDecl>(node).unwrap();
             self.syms
                 .insert(var_decl.name.clone(), var_decl.typ.clone());
             if let Some(init_value) = &mut var_decl.init_value {
-                let val_typ = self.analyze(init_value);
+                let val_typ = self.analyze(init_value)?;
                 // if val_typ does not match the decl's typ, insert implicit cast
                 if val_typ != var_decl.typ {
                     var_decl.init_value = Some(Box::new(UnaryOp {
@@ -177,7 +179,7 @@ impl<'a> Semantic<'a> {
                     }));
                 }
             }
-            Type::Void
+            Ok(Type::Void)
         } else if is::<ConstArray>(node) {
             let const_array = cast_mut::<ConstArray>(node).unwrap();
             self.syms
@@ -188,7 +190,7 @@ impl<'a> Semantic<'a> {
             };
 
             for init_val in &mut const_array.init_values {
-                let val_type = self.analyze(init_val);
+                let val_type = self.analyze(init_val)?;
                 // We don't insert cast node for ConstArray, we directly modify the init_val node.
                 if val_type != base {
                     let literal = cast_mut::<Literal>(init_val).unwrap();
@@ -207,14 +209,14 @@ impl<'a> Semantic<'a> {
                     }
                 }
             }
-            Type::Void
-        } else if is::<LocalArray>(node) {
-            let local_array = cast_mut::<LocalArray>(node).unwrap();
+            Ok(Type::Void)
+        } else if is::<VarArray>(node) {
+            let local_array = cast_mut::<VarArray>(node).unwrap();
             self.syms
                 .insert(local_array.name.clone(), local_array.typ.clone());
             if let Some(init_values) = &mut local_array.init_values {
                 for init_val in init_values {
-                    let val_typ = self.analyze(init_val);
+                    let val_typ = self.analyze(init_val)?;
                     // since we don't know whether the init_values is float or int, we insert cast node here.
                     if val_typ != local_array.typ {
                         match val_typ {
@@ -239,7 +241,7 @@ impl<'a> Semantic<'a> {
                     }
                 }
             }
-            Type::Void
+            Ok(Type::Void)
 
         // Statements
         } else if is::<Block>(node) {
@@ -249,11 +251,11 @@ impl<'a> Semantic<'a> {
                 self.analyze(stmt);
             }
             self.syms.exit_scope();
-            Type::Void
+            Ok(Type::Void)
         } else if is::<If>(node) {
             let if_stmt = cast_mut::<If>(node).unwrap();
             // Do implicit cast for cond if necessary.
-            let cond_type = self.analyze(&mut if_stmt.condition);
+            let cond_type = self.analyze(&mut if_stmt.condition)?;
             if matches!(cond_type, Type::Float) {
                 if_stmt.condition = Box::new(BinaryOp {
                     typ: Type::Int,
@@ -267,10 +269,10 @@ impl<'a> Semantic<'a> {
             if let Some(else_branch) = &mut if_stmt.else_block {
                 self.analyze(else_branch);
             }
-            Type::Void
+            Ok(Type::Void)
         } else if is::<While>(node) {
             let while_stmt = cast_mut::<While>(node).unwrap();
-            let cond_type = self.analyze(&mut while_stmt.condition);
+            let cond_type = self.analyze(&mut while_stmt.condition)?;
             if matches!(cond_type, Type::Float) {
                 while_stmt.condition = Box::new(BinaryOp {
                     typ: Type::Int,
@@ -280,18 +282,18 @@ impl<'a> Semantic<'a> {
                 });
             }
 
-            self.analyze(&mut while_stmt.body);
-            Type::Void
+            self.analyze(&mut while_stmt.body)?;
+            Ok(Type::Void)
         } else if is::<Return>(node) {
             let ret = cast_mut::<Return>(node).unwrap();
             if let Some(expr) = &mut ret.0 {
-                self.analyze(expr);
+                self.analyze(expr)?;
             }
-            Type::Void
+            Ok(Type::Void)
         } else if is::<Assign>(node) {
             let assign = cast_mut::<Assign>(node).unwrap();
-            let lhs_type = self.analyze(&mut assign.lhs);
-            let rhs_type = self.analyze(&mut assign.rhs);
+            let lhs_type = self.analyze(&mut assign.lhs)?;
+            let rhs_type = self.analyze(&mut assign.rhs)?;
             // insert implicit cast if necessary
             if lhs_type != rhs_type {
                 assign.rhs = Box::new(UnaryOp {
@@ -301,18 +303,19 @@ impl<'a> Semantic<'a> {
                 });
             }
 
-            Type::Void
+            Ok(Type::Void)
         } else {
-            Type::Void
+            Ok(Type::Void)
         }
     }
+
 }
 
-impl<'a> Pass for Semantic<'a> {
-    fn run(&mut self) -> Result<(), String> {
-        let node = self.node.take().unwrap();
-        self.analyze(node);
-        Ok(())
+impl Pass<Box<dyn Node>> for Semantic<'_> {
+    fn run(&mut self) -> Result<Box<dyn Node>, String> {
+        let mut node = self.node.take().unwrap();
+        self.analyze(&mut node);
+        Ok(node)
     }
 }
 

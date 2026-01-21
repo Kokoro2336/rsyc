@@ -1,3 +1,0 @@
-/**
- * Original IR generation.
- */

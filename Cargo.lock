@@ -210,6 +210,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
+name = "compiler"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "clap_builder",
+ "clap_derive",
+ "clap_lex 0.7.7",
+ "graphviz-rust",
+ "lalrpop",
+ "lalrpop-util",
+ "libc",
+ "textwrap",
+ "tool",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -955,26 +975,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "sysy_compiler"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "clap",
- "clap_builder",
- "clap_derive",
- "clap_lex 0.7.7",
- "graphviz-rust",
- "lalrpop",
- "lalrpop-util",
- "libc",
- "textwrap",
- "tool",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
 ]
 
 [[package]]

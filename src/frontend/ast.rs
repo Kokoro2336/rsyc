@@ -4,11 +4,21 @@ use crate::base::r#type::Type;
 use crate::debug::graph::GraphNode;
 
 // We can't impl Clone for dyn Node, because Clone return self, and self it's unknown at compile time.
-pub trait Node: Any + std::fmt::Debug + GraphNode {
+pub trait Node: Any + std::fmt::Debug + GraphNode + CloneBox {
     fn as_any(&self) -> &dyn Any;
 }
 
-#[derive(Debug)]
+pub trait CloneBox {
+    fn clone_box(&self) -> Box<dyn Node>;
+}
+
+impl Clone for Box<dyn Node> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct FnDecl {
     pub name: String,
     pub params: Vec<(String, Type)>,
@@ -16,40 +26,40 @@ pub struct FnDecl {
     pub body: Box<dyn Node>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Break();
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Continue();
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Return(pub Option<Box<dyn Node>>);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Block {
     pub statements: Vec<Box<dyn Node>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Assign {
     pub lhs: Box<dyn Node>,
     pub rhs: Box<dyn Node>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct If {
     pub condition: Box<dyn Node>,
     pub then_block: Box<dyn Node>,
     pub else_block: Option<Box<dyn Node>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct While {
     pub condition: Box<dyn Node>,
     pub body: Box<dyn Node>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BinaryOp {
     pub typ: Type,
     pub lhs: Box<dyn Node>,
@@ -57,14 +67,14 @@ pub struct BinaryOp {
     pub rhs: Box<dyn Node>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UnaryOp {
     pub typ: Type,
     pub op: Op,
     pub operand: Box<dyn Node>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Call {
     pub typ: Type,
     pub func_name: String,
@@ -72,7 +82,7 @@ pub struct Call {
 }
 
 // Var
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VarDecl {
     pub name: String,
     pub typ: Type,
@@ -80,38 +90,39 @@ pub struct VarDecl {
     pub init_value: Option<Box<dyn Node>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VarAccess {
     pub name: String,
     pub typ: Type,
 }
 
 // Array
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ConstArray {
     pub name: String,
     pub typ: Type,
     pub init_values: Vec<Box<dyn Node>>,
 }
 
-#[derive(Debug)]
-pub struct LocalArray {
+#[derive(Debug, Clone)]
+pub struct VarArray {
     pub name: String,
+    pub is_global: bool,
     pub typ: Type,
     pub init_values: Option<Vec<Box<dyn Node>>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ArrayAccess {
     pub name: String,
     pub indices: Vec<Box<dyn Node>>,
     pub typ: Type,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Empty();
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Literal {
     Int(i32),
     Float(f32),
@@ -134,7 +145,7 @@ impl Literal {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Op {
     // unary
     Plus,
@@ -169,7 +180,7 @@ impl Op {
     }
 }
 
-macro_rules! impl_node {
+macro_rules! impl_node_and_clone {
     ($($t:ty),*) => {
         $(
             impl Node for $t {
@@ -177,11 +188,18 @@ macro_rules! impl_node {
                     self
                 }
             }
+
+            impl CloneBox for $t
+            where $t: Clone + 'static + Node {
+                fn clone_box(&self) -> Box<dyn Node> {
+                    Box::new(self.clone())
+                }
+            }
         )*
     };
 }
 
-impl_node!(
+impl_node_and_clone!(
     FnDecl,
     Block,
     Break,
@@ -193,7 +211,7 @@ impl_node!(
     VarDecl,
     VarAccess,
     ConstArray,
-    LocalArray,
+    VarArray,
     ArrayAccess,
     Empty,
     Assign,
@@ -208,13 +226,13 @@ impl_node!(
 
 // Raw struct passed through parsing phase
 // Processed declaration aggregation
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DeclAggr {
     pub decls: Vec<Box<dyn Node>>,
 }
 
 // Original declaration aggregation
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RawDecl {
     pub typ: Type,
     pub mutable: bool,
@@ -222,15 +240,15 @@ pub struct RawDecl {
 }
 
 // Original signle declaration
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RawDef {
     pub ident: String,
-    pub const_exps: Vec<u32>,
+    pub const_exps: Vec<Box<dyn Node>>,
     pub init_val: Option<Box<dyn Node>>,
 }
 
 // Original array initialization values
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ArrayInitVal {
     pub init_vals: Vec<Box<dyn Node>>,
 }

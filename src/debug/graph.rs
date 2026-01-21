@@ -1,5 +1,4 @@
 use std::fs::File;
-use std::io::Write;
 use std::path::PathBuf;
 
 pub use graphviz_rust::attributes::*;
@@ -38,7 +37,6 @@ pub fn dump_graph(directed: bool, node: &dyn GraphNode, name: &str) {
     let mut ctx = PrinterContext::default();
     ctx.with_semi();
     let graph_dot = graph.print(&mut ctx);
-    info!("Graph DOT format: \n{}", graph_dot);
 
     // Since graphviz-rust might enforce strict Output formats, the most robust way
     // to force "ascii" (which is a valid DOT flag but maybe not in the crate's enum)
@@ -46,32 +44,51 @@ pub fn dump_graph(directed: bool, node: &dyn GraphNode, name: &str) {
     use std::io::Write;
     use std::process::{Command, Stdio};
 
-    // 2. Feed it to graph-easy
-    let mut child = Command::new("dot")
-        // set type
-        .arg("-Tsvg") // Options: ascii, boxart, unicode
-        // set size
+    // 1. Setup 'unflatten' (The Producer)
+    let mut unflatten_child = Command::new("unflatten")
+        .arg("-l")
+        .arg("3")
+        .arg("-c")
+        .arg("5")
+        .stdin(Stdio::piped()) // We write to this
+        .stdout(Stdio::piped()) // Its output goes to dot
+        .spawn()
+        .expect("Failed to spawn unflatten");
+
+    // 2. Setup 'dot' (The Consumer)
+    // It reads from unflatten, so we don't touch its stdin from Rust
+    let dot_child = Command::new("dot")
+        .arg("-Tsvg")
         .arg("-Gsize=10,10")
-        // fill the canvas
         .arg("-Gratio=fill")
-        // use curved edges
         .arg("-Gsplines=curved")
-        .stdin(Stdio::piped())
+        .stdin(
+            unflatten_child
+                .stdout
+                .take() // Connect unflatten's stdout to dot's stdin
+                .expect("Failed to open unflatten stdout"),
+        )
         .stdout(Stdio::piped())
         .spawn()
-        .expect("Failed to run 'graph-easy'. Is it installed?");
+        .expect("Failed to spawn dot");
 
-    {
-        let stdin = child.stdin.as_mut().expect("Failed to open stdin");
+    // 3. Write data to the *start* of the pipe (unflatten)
+    if let Some(mut stdin) = unflatten_child.stdin.take() {
         stdin
             .write_all(graph_dot.as_bytes())
-            .expect("Failed to write to stdin");
-    }
-    let output = child.wait_with_output().expect("Failed to read stdout");
-    // Check for errors in the tool's execution
+            .expect("Failed to write to unflatten");
+    } // 'stdin' is dropped here, sending EOF to unflatten. Important!
+
+    // 4. Wait for the chain to finish
+    // We must wait for unflatten so it finishes flushing data to dot
+    unflatten_child.wait().expect("unflatten failed");
+
+    // 5. Capture the final output from dot
+    let output = dot_child.wait_with_output().expect("Failed to read stdout");
+
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
-        panic!("graph-easy failed: {}", err);
+        panic!("dot failed: {}", err);
     }
 
     let graph_path = PathBuf::from(GRAPH_DUMP_DIR).join(format!("{}.html", name));

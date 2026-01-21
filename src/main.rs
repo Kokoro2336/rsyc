@@ -2,7 +2,6 @@ use clap::Parser;
 use lalrpop_util::lalrpop_mod;
 use std::fs::read_to_string;
 use std::io::Result;
-use std::path::PathBuf;
 
 mod asm;
 mod base;
@@ -13,9 +12,10 @@ mod utils;
 use crate::base::Pass;
 use crate::debug::setup;
 use crate::frontend::ast::Node;
+use crate::frontend::parse;
 use crate::frontend::semantic::Semantic;
 
-use debug::graph::{dump_graph, GraphNode};
+use debug::graph::dump_graph;
 use debug::info;
 
 // 引用 lalrpop 生成的解析器
@@ -75,14 +75,21 @@ fn main() -> Result<()> {
     let input = read_to_string(input)?;
 
     // 调用 lalrpop 生成的 parser 解析输入文件
-    let mut result = sysy::CompUnitParser::new().parse(&input).unwrap();
+    let mut result = sysy::CompUnitParser::new()
+        .parse(&mut parse::Parser::new(), &input)
+        .unwrap();
     info!("\nParsed result: {:#?}", result);
 
     info!("Start Semantic Analysis.");
-    {
-        let mut pass: Box<dyn Pass> = Box::new(Semantic::new(&mut result));
-        pass.run();
-    }
+    let result = {
+        let mut pass: Box<dyn Pass<Box<dyn Node>>> = Box::new(Semantic::new(result));
+        match pass.run() {
+            Ok(res) => res,
+            Err(e) => {
+                panic!("Semantic Analysis Error: {}", e);
+            }
+        }
+    };
     info!("Finish Semantic Analysis");
 
     // Try to dump graph to log file

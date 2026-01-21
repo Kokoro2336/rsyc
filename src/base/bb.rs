@@ -1,5 +1,4 @@
 use crate::base::ir::{OpId, DFG};
-use crate::debug::error;
 use crate::utils::arena::*;
 
 pub type BBId = usize;

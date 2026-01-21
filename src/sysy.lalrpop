@@ -1,10 +1,10 @@
 use crate::base::r#type::Type;
 use crate::frontend::ast::*;
 use crate::frontend::parse::*;
-use crate::utils::{is, cast_deref};
+use crate::utils::{is, cast_deref, cast_mut, cast};
 
 // lalrpop 里的约定
-grammar;
+grammar(parser: &mut Parser);
 
 // 约束 lexer 的行为
 match {
@@ -19,7 +19,7 @@ match {
 // 定义 CompUnit, 其返回值类型为 String
 // parser 在解析完成后的行为是返回 FuncDef 的值
 pub CompUnit: Box<dyn Node> = {
-  <global_objs: (GlobalObj)*> => {
+  <enter_scope: EnterScope> <global_objs: (GlobalObj)*> <exit_scope: ExitScope> => {
     Box::new(
       Block {
         statements: {
@@ -27,7 +27,10 @@ pub CompUnit: Box<dyn Node> = {
           for obj in global_objs {
             if is::<DeclAggr>(&*obj) {
               let decl_aggr = cast_deref::<DeclAggr>(obj).unwrap();
-              for decl in decl_aggr.decls.into_iter() {
+              for mut decl in decl_aggr.decls.into_iter() {
+                if let Some(var_array) = cast_mut::<VarArray>(&mut decl) {
+                  var_array.is_global = true;
+                }
                 vec.push(decl);
               }
             } else {
@@ -39,6 +42,19 @@ pub CompUnit: Box<dyn Node> = {
       }
     )
   }
+};
+
+// add scope management rules
+EnterScope: () = {
+  () => {
+    parser.syms.enter_scope();
+  },
+};
+
+ExitScope: () = {
+  () => {
+    parser.syms.exit_scope();
+  },
 };
 
 GlobalObj: Box<dyn Node> = {
@@ -108,14 +124,11 @@ FuncFParam: (String, Type) = {
     let arr_type = Type::Pointer {
       base: Box::new(Type::Array {
         base: Box::new(param_type),
-        dims: other_const_exps.into_iter().map(|(_, exp, _)| {
-          // we only need the size info here, so we can assume the ConstExp is IntConst
-          if let Literal::Int(int_node) = exp.as_any().downcast_ref::<Literal>().unwrap() {
-            *int_node as u32
-          } else {
-            panic!("Array size must be a constant integer: {:?}", exp);
-          }
-        }).collect::<Vec<u32>>(),
+        // fold dims here
+        dims: other_const_exps.into_iter().map(|(_, exp, _)| match cast::<Literal>(&*parser.fold(exp)).unwrap() {
+          Literal::Int(i) => *i as u32,
+          _ => panic!("Array dimension must be an integer literal"),
+        }).collect()
       }),
     };
     (ident, arr_type)
@@ -132,7 +145,7 @@ BType: Type = {
   "float" => Type::Float,
 };
 
-Block: Box<dyn Node> = "{" <block_items: (BlockItem)*> "}" => Box::new(Block { statements: {
+Block: Box<dyn Node> = "{" <enter_scope: EnterScope> <block_items: (BlockItem)*> <exit_scope: ExitScope> "}" => Box::new(Block { statements: {
   let mut vec = vec![];
   for item in block_items {
     if is::<DeclAggr>(&*item) {
@@ -230,7 +243,7 @@ ConstDecl: Box<dyn Node> = {
     }
     Box::new(
       DeclAggr {
-        decls: canonicalize(
+        decls: parser.canonicalize(
           RawDecl {
             typ: b_type,
             mutable: false,
@@ -247,13 +260,7 @@ ConstDef: RawDef = {
     // if const_exps is empty, then it's a scalar, we directly construct a VarDecl
     RawDef {
       ident,
-      const_exps: const_exps.into_iter().map(|(_, exp, _)| 
-        if let Literal::Int(int_node) = exp.as_any().downcast_ref::<Literal>().unwrap() {
-          *int_node as u32
-        } else {
-          panic!("Array size must be a constant integer: {:?}", exp);
-        }
-      ).collect(),
+      const_exps: const_exps.into_iter().map(|(_, exp, _)| exp).collect(),
       init_val: Some(const_init_val),
     }
   }
@@ -273,8 +280,7 @@ ConstInitVal: Box<dyn Node> = {
 
 ConstExp: Box<dyn Node> = {
   <exp: Exp> => {
-    // do constant folding here
-    fold(exp)
+    exp
   },
 }
 
@@ -287,7 +293,7 @@ VarDecl: Box<dyn Node> = {
 
     Box::new(
       DeclAggr {
-        decls: canonicalize(
+        decls: parser.canonicalize(
           RawDecl {
             typ: b_type,
             mutable: true,
@@ -302,24 +308,12 @@ VarDecl: Box<dyn Node> = {
 VarDef: RawDef = {
   <ident: Ident> <const_exps: ("[" ConstExp "]")*> "=" <init_val: InitVal> => RawDef {
     ident, 
-    const_exps: const_exps.into_iter().map(|(_, exp, _)| {
-      if let Literal::Int(int_node) = exp.as_any().downcast_ref::<Literal>().unwrap() {
-        *int_node as u32
-      } else {
-        panic!("Array size must be a constant integer: {:?}", exp);
-      }
-    }).collect(), 
+    const_exps: const_exps.into_iter().map(|(_, exp, _)| exp).collect(),
     init_val: Some(init_val),
   },
   <ident: Ident> <const_exps: ("[" ConstExp "]")*> => RawDef { 
     ident, 
-    const_exps: const_exps.into_iter().map(|(_, exp, _)| {
-      if let Literal::Int(int_node) = exp.as_any().downcast_ref::<Literal>().unwrap() {
-        *int_node as u32
-      } else {
-        panic!("Array size must be a constant integer: {:?}", exp);
-      }
-    }).collect(), 
+    const_exps: const_exps.into_iter().map(|(_, exp, _)| exp).collect(),
     init_val: None,
   },
 };
