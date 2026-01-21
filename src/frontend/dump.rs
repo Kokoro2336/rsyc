@@ -1,13 +1,11 @@
-use crate::debug::graph::{self, attr, id, Attribute, Edge, EdgeTy, GraphNode, Id, NodeId, Stmt, Vertex};
-use crate::frontend::ast::*; 
+use crate::debug::graph::{
+    self, attr, id, Attribute, Edge, EdgeTy, GraphNode, Id, NodeId, Stmt, Vertex,
+};
+use crate::frontend::ast::*;
 
 /* GraphNode implementations for AST nodes */
 impl GraphNode for FnDecl {
-    fn visit(
-        &self,
-        stmts: &mut Vec<Stmt>,
-        visited: &mut std::collections::HashSet<usize>,
-    ) {
+    fn visit(&self, stmts: &mut Vec<Stmt>, visited: &mut std::collections::HashSet<usize>) {
         let ptr = self as *const _ as usize;
         if visited.contains(&ptr) {
             return;
@@ -18,8 +16,14 @@ impl GraphNode for FnDecl {
             vec![
                 attr!("label", {
                     format!(
-                        "\"FnDecl: {}() | Params: {:?} | Return Type: {:?}\"",
-                        self.name, self.params, self.return_type
+                        "\"FnDecl: {}() | Params: [{}] | Return Type: {:?}\"",
+                        self.name,
+                        self.params
+                            .iter()
+                            .map(|x| format!("{} {}", x.1, x.0))
+                            .collect::<Vec<String>>()
+                            .join("; "),
+                        self.return_type
                     )
                 }),
                 attr!("shape", "box"),
@@ -36,10 +40,7 @@ impl GraphNode for FnDecl {
         stmts.push(Stmt::Edge(Edge {
             ty: EdgeTy::Pair(
                 Vertex::N(NodeId(Id::Plain(format!("\"{}\"", ptr)), None)),
-                Vertex::N(NodeId(
-                    Id::Plain(format!("\"{}\"", to)),
-                    None,
-                )),
+                Vertex::N(NodeId(Id::Plain(format!("\"{}\"", to)), None)),
             ),
             attributes: vec![],
         }));
@@ -49,11 +50,7 @@ impl GraphNode for FnDecl {
 }
 
 impl GraphNode for Break {
-    fn visit(
-        &self,
-        stmts: &mut Vec<Stmt>,
-        visited: &mut std::collections::HashSet<usize>,
-    ) {
+    fn visit(&self, stmts: &mut Vec<Stmt>, visited: &mut std::collections::HashSet<usize>) {
         let ptr = self as *const _ as usize;
         if visited.contains(&ptr) {
             return;
@@ -69,11 +66,7 @@ impl GraphNode for Break {
 }
 
 impl GraphNode for Continue {
-    fn visit(
-        &self,
-        stmts: &mut Vec<Stmt>,
-        visited: &mut std::collections::HashSet<usize>,
-    ) {
+    fn visit(&self, stmts: &mut Vec<Stmt>, visited: &mut std::collections::HashSet<usize>) {
         let ptr = self as *const _ as usize;
         if visited.contains(&ptr) {
             return;
@@ -89,11 +82,7 @@ impl GraphNode for Continue {
 }
 
 impl GraphNode for Return {
-    fn visit(
-        &self,
-        stmts: &mut Vec<Stmt>,
-        visited: &mut std::collections::HashSet<usize>,
-    ) {
+    fn visit(&self, stmts: &mut Vec<Stmt>, visited: &mut std::collections::HashSet<usize>) {
         let ptr = self as *const _ as usize;
         if visited.contains(&ptr) {
             return;
@@ -126,11 +115,7 @@ impl GraphNode for Return {
 }
 
 impl GraphNode for Block {
-    fn visit(
-        &self,
-        stmts: &mut Vec<Stmt>,
-        visited: &mut std::collections::HashSet<usize>,
-    ) {
+    fn visit(&self, stmts: &mut Vec<Stmt>, visited: &mut std::collections::HashSet<usize>) {
         let ptr = self as *const _ as usize;
         if visited.contains(&ptr) {
             return;
@@ -163,11 +148,7 @@ impl GraphNode for Block {
 }
 
 impl GraphNode for Assign {
-    fn visit(
-        &self,
-        stmts: &mut Vec<Stmt>,
-        visited: &mut std::collections::HashSet<usize>,
-    ) {
+    fn visit(&self, stmts: &mut Vec<Stmt>, visited: &mut std::collections::HashSet<usize>) {
         let ptr = self as *const _ as usize;
         if visited.contains(&ptr) {
             return;
@@ -209,11 +190,7 @@ impl GraphNode for Assign {
 }
 
 impl GraphNode for If {
-    fn visit(
-        &self,
-        stmts: &mut Vec<Stmt>,
-        visited: &mut std::collections::HashSet<usize>,
-    ) {
+    fn visit(&self, stmts: &mut Vec<Stmt>, visited: &mut std::collections::HashSet<usize>) {
         let ptr = self as *const _ as usize;
         if visited.contains(&ptr) {
             return;
@@ -267,11 +244,7 @@ impl GraphNode for If {
 }
 
 impl GraphNode for While {
-    fn visit(
-        &self,
-        stmts: &mut Vec<Stmt>,
-        visited: &mut std::collections::HashSet<usize>,
-    ) {
+    fn visit(&self, stmts: &mut Vec<Stmt>, visited: &mut std::collections::HashSet<usize>) {
         let ptr = self as *const _ as usize;
         if visited.contains(&ptr) {
             return;
@@ -311,11 +284,7 @@ impl GraphNode for While {
 }
 
 impl GraphNode for BinaryOp {
-    fn visit(
-        &self,
-        stmts: &mut Vec<Stmt>,
-        visited: &mut std::collections::HashSet<usize>,
-    ) {
+    fn visit(&self, stmts: &mut Vec<Stmt>, visited: &mut std::collections::HashSet<usize>) {
         let ptr = self as *const _ as usize;
         if visited.contains(&ptr) {
             return;
@@ -358,11 +327,7 @@ impl GraphNode for BinaryOp {
 }
 
 impl GraphNode for UnaryOp {
-    fn visit(
-        &self,
-        stmts: &mut Vec<Stmt>,
-        visited: &mut std::collections::HashSet<usize>,
-    ) {
+    fn visit(&self, stmts: &mut Vec<Stmt>, visited: &mut std::collections::HashSet<usize>) {
         let ptr = self as *const _ as usize;
         if visited.contains(&ptr) {
             return;
@@ -393,11 +358,7 @@ impl GraphNode for UnaryOp {
 }
 
 impl GraphNode for Call {
-    fn visit(
-        &self,
-        stmts: &mut Vec<Stmt>,
-        visited: &mut std::collections::HashSet<usize>,
-    ) {
+    fn visit(&self, stmts: &mut Vec<Stmt>, visited: &mut std::collections::HashSet<usize>) {
         let ptr = self as *const _ as usize;
         if visited.contains(&ptr) {
             return;
@@ -433,11 +394,7 @@ impl GraphNode for Call {
 }
 
 impl GraphNode for VarDecl {
-    fn visit(
-        &self,
-        stmts: &mut Vec<Stmt>,
-        visited: &mut std::collections::HashSet<usize>,
-    ) {
+    fn visit(&self, stmts: &mut Vec<Stmt>, visited: &mut std::collections::HashSet<usize>) {
         let ptr = self as *const _ as usize;
         if visited.contains(&ptr) {
             return;
@@ -475,11 +432,7 @@ impl GraphNode for VarDecl {
 }
 
 impl GraphNode for VarAccess {
-    fn visit(
-        &self,
-        stmts: &mut Vec<Stmt>,
-        visited: &mut std::collections::HashSet<usize>,
-    ) {
+    fn visit(&self, stmts: &mut Vec<Stmt>, visited: &mut std::collections::HashSet<usize>) {
         let ptr = self as *const _ as usize;
         if visited.contains(&ptr) {
             return;
@@ -500,11 +453,7 @@ impl GraphNode for VarAccess {
 }
 
 impl GraphNode for ConstArray {
-    fn visit(
-        &self,
-        stmts: &mut Vec<Stmt>,
-        visited: &mut std::collections::HashSet<usize>,
-    ) {
+    fn visit(&self, stmts: &mut Vec<Stmt>, visited: &mut std::collections::HashSet<usize>) {
         let ptr = self as *const _ as usize;
         if visited.contains(&ptr) {
             return;
@@ -542,11 +491,7 @@ impl GraphNode for ConstArray {
 }
 
 impl GraphNode for VarArray {
-    fn visit(
-        &self,
-        stmts: &mut Vec<Stmt>,
-        visited: &mut std::collections::HashSet<usize>,
-    ) {
+    fn visit(&self, stmts: &mut Vec<Stmt>, visited: &mut std::collections::HashSet<usize>) {
         let ptr = self as *const _ as usize;
         if visited.contains(&ptr) {
             return;
@@ -556,7 +501,10 @@ impl GraphNode for VarArray {
             graph::NodeId(Id::Plain(format!("\"{}\"", ptr)), None),
             vec![
                 attr!("label", {
-                    format!("\"VarArray: {} | Type: {} | is_global: {}\"", self.name, self.typ, self.is_global)
+                    format!(
+                        "\"VarArray: {} | Type: {} | is_global: {}\"",
+                        self.name, self.typ, self.is_global
+                    )
                 }),
                 attr!("shape", "box"),
             ],
@@ -586,11 +534,7 @@ impl GraphNode for VarArray {
 }
 
 impl GraphNode for ArrayAccess {
-    fn visit(
-        &self,
-        stmts: &mut Vec<Stmt>,
-        visited: &mut std::collections::HashSet<usize>,
-    ) {
+    fn visit(&self, stmts: &mut Vec<Stmt>, visited: &mut std::collections::HashSet<usize>) {
         let ptr = self as *const _ as usize;
         if visited.contains(&ptr) {
             return;
@@ -628,11 +572,7 @@ impl GraphNode for ArrayAccess {
 }
 
 impl GraphNode for Empty {
-    fn visit(
-        &self,
-        stmts: &mut Vec<Stmt>,
-        visited: &mut std::collections::HashSet<usize>,
-    ) {
+    fn visit(&self, stmts: &mut Vec<Stmt>, visited: &mut std::collections::HashSet<usize>) {
         let ptr = self as *const _ as usize;
         if visited.contains(&ptr) {
             return;
@@ -648,11 +588,7 @@ impl GraphNode for Empty {
 }
 
 impl GraphNode for Literal {
-    fn visit(
-        &self,
-        stmts: &mut Vec<Stmt>,
-        visited: &mut std::collections::HashSet<usize>,
-    ) {
+    fn visit(&self, stmts: &mut Vec<Stmt>, visited: &mut std::collections::HashSet<usize>) {
         let ptr = self as *const _ as usize;
         if visited.contains(&ptr) {
             return;
@@ -674,7 +610,7 @@ impl GraphNode for Literal {
 
 macro_rules! impl_graph_node_for_raw_node {
     ($($t:ty),*) => {
-        $( 
+        $(
             impl GraphNode for $t {
                 fn visit(
                     &self,

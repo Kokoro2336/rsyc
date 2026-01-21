@@ -49,11 +49,8 @@ def main():
 
     # Ensure cargo build is run
     print("Running cargo build...")
-    build_result = run_command([
-        "RUSTFLAG='-A warnings'",
-        "cargo",
-        "build",
-    ], capture_output=False)
+    build_result = run_command("RUSTFLAG='-A warnings' cargo build", capture_output=False)
+
     if build_result.returncode != 0:
         print("Build failed. Exiting.")
         sys.exit(1)
