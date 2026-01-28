@@ -262,8 +262,28 @@ impl Parser {
                             } else {
                                 panic!("Array size must be a constant integer: {:?}", lit);
                             }
+                            // it can also be a const variable, but we have folded it already
+                        } else if is::<VarAccess>(&*exp_node) {
+                            let var_access = cast_deref::<VarAccess>(exp_node).unwrap();
+                            if let Some(const_val) = self.syms.get(&var_access.name) {
+                                if is::<Literal>(&**const_val) {
+                                    let lit = cast::<Literal>(const_val).unwrap();
+                                    if let Literal::Int(int_node) = *lit {
+                                        int_node as u32
+                                    } else {
+                                        panic!("Array size must be a constant integer: {:?}", lit);
+                                    }
+                                } else {
+                                    panic!(
+                                        "Array size variable {} is not a constant literal",
+                                        var_access.name
+                                    );
+                                }
+                            } else {
+                                panic!("Undefined variable {} for array size", var_access.name);
+                            }
                         } else {
-                            panic!("Array size must be a constant integer: {:?}", exp_node);
+                            panic!("Array size must be a constant literal or const variable");
                         }
                     })
                     .collect();

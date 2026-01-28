@@ -47,6 +47,11 @@ def main():
     parser.add_argument('--clean', action='store_true', help='Clean test directories before running')
     args = parser.parse_args()
 
+    if args.clean and not (args.test or args.test_all):
+        clean_directory("./test")
+        print("Cleaned test directory.")
+        sys.exit(0)
+
     # Ensure cargo build is run
     print("Running cargo build...")
     build_result = run_command("RUSTFLAG='-A warnings' cargo build", capture_output=False)
@@ -147,6 +152,9 @@ def main():
                 if os.path.exists(test_output_dir):
                     shutil.rmtree(test_output_dir)
                 os.makedirs(test_output_dir)
+
+                # Copy original source file
+                shutil.copy2(test_file, test_output_dir)
 
                 # Save stdout/stderr
                 with open(os.path.join(test_output_dir, "stdout.txt"), "wb") as f:
