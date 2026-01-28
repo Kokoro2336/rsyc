@@ -8,6 +8,12 @@ pub trait Node: Any + std::fmt::Debug + GraphNode + CloneBox {
     fn as_any(&self) -> &dyn Any;
 }
 
+impl Default for Box<dyn Node> {
+    fn default() -> Self {
+        Box::new(Empty())
+    }
+}
+
 pub trait CloneBox {
     fn clone_box(&self) -> Box<dyn Node>;
 }

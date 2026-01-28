@@ -92,7 +92,7 @@ pub fn dump_graph(directed: bool, node: &dyn GraphNode, name: &str) {
         panic!("dot failed: {}", err);
     }
 
-    let graph_path = PathBuf::from(GRAPH_DUMP_DIR).join(format!("{}.html", name));
+    let graph_path = PathBuf::from(GRAPH_DUMP_DIR).join(format!("{}.svg", name));
     if !PathBuf::from(GRAPH_DUMP_DIR).exists() {
         std::fs::create_dir_all(GRAPH_DUMP_DIR).expect("Failed to create graph dump directory");
     }

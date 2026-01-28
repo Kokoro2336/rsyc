@@ -133,7 +133,8 @@ impl Parser {
                 Literal::Float(val) => Box::new(Literal::Float(val)),
             }
         } else if is::<VarAccess>(&*node) {
-            let var_access = cast_mut::<VarAccess>(&mut node).unwrap();
+            info!("Folding VarAccess: {:?}", node);
+            let var_access = cast_mut::<VarAccess>(&mut *node).unwrap();
             if let Some(const_val) = self.syms.get(&var_access.name) {
                 if is::<Literal>(&**const_val) {
                     let lit = cast::<Literal>(&**const_val).unwrap();
@@ -183,7 +184,7 @@ impl Parser {
                                     flat_index += (idx as usize) * stride;
                                     // calculate stride
                                     if let Type::Array { dims, .. } = &const_array.typ {
-                                        stride *= dims.last().unwrap().clone() as usize;
+                                        stride *= *dims.last().unwrap() as usize;
                                     } else {
                                         panic!("ArrayAccess type is not Array");
                                     }
@@ -254,6 +255,8 @@ impl Parser {
                 let dims: Vec<u32> = raw_decl
                     .const_exps
                     .into_iter()
+                    // remember to fold it first.
+                    .map(|exp_node| self.fold(exp_node))
                     .map(|exp_node| {
                         if is::<Literal>(&*exp_node) {
                             let lit = cast_deref::<Literal>(exp_node).unwrap();
@@ -261,26 +264,6 @@ impl Parser {
                                 int_node as u32
                             } else {
                                 panic!("Array size must be a constant integer: {:?}", lit);
-                            }
-                            // it can also be a const variable, but we have folded it already
-                        } else if is::<VarAccess>(&*exp_node) {
-                            let var_access = cast_deref::<VarAccess>(exp_node).unwrap();
-                            if let Some(const_val) = self.syms.get(&var_access.name) {
-                                if is::<Literal>(&**const_val) {
-                                    let lit = cast::<Literal>(const_val).unwrap();
-                                    if let Literal::Int(int_node) = *lit {
-                                        int_node as u32
-                                    } else {
-                                        panic!("Array size must be a constant integer: {:?}", lit);
-                                    }
-                                } else {
-                                    panic!(
-                                        "Array size variable {} is not a constant literal",
-                                        var_access.name
-                                    );
-                                }
-                            } else {
-                                panic!("Undefined variable {} for array size", var_access.name);
                             }
                         } else {
                             panic!("Array size must be a constant literal or const variable");
