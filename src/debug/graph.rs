@@ -37,7 +37,6 @@ pub fn dump_graph(directed: bool, node: &dyn GraphNode, name: &str) {
     let mut ctx = PrinterContext::default();
     ctx.with_semi();
     let graph_dot = graph.print(&mut ctx);
-    info!("Graph DOT:\n{}", graph_dot);
 
     // Since graphviz-rust might enforce strict Output formats, the most robust way
     // to force "ascii" (which is a valid DOT flag but maybe not in the crate's enum)

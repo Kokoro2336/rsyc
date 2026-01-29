@@ -33,6 +33,10 @@ struct Cli {
     #[arg(short = 'r', long = "riscv", default_value_t = false)]
     riscv: bool,
 
+    /// dump graph
+    #[arg(long = "graph", default_value_t = false)]
+    graph: bool,
+
     /// positional argument for input file.
     #[arg(value_name = "INPUT")]
     input: std::path::PathBuf,
@@ -75,10 +79,10 @@ fn main() -> Result<()> {
     let input = read_to_string(input)?;
 
     // 调用 lalrpop 生成的 parser 解析输入文件
-    let mut result = sysy::CompUnitParser::new()
+    let result = sysy::CompUnitParser::new()
         .parse(&mut parse::Parser::new(), &input)
         .unwrap();
-    info!("\nParsed result: {:#?}", result);
+    // info!("\nParsed result: {:#?}", result);
 
     info!("Start Semantic Analysis.");
     let result = {
@@ -93,7 +97,10 @@ fn main() -> Result<()> {
     info!("Finish Semantic Analysis");
 
     // Try to dump graph to log file
-    dump_graph(true, &*result, "ast");
+    if cli.graph {
+        info!("Dumping AST graph.");
+        dump_graph(true, &*result, "ast");
+    }
 
     Ok(())
 }

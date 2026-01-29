@@ -45,6 +45,7 @@ def main():
     group.add_argument('--test-all', action='store_true', help='Test all .sy source files')
     parser.add_argument('--hidden', action='store_true', help='Include hidden functional tests')
     parser.add_argument('--clean', action='store_true', help='Clean test directories before running')
+    parser.add_argument('--graph', action='store_true', help='Dump AST graph')
     args = parser.parse_args()
 
     if args.clean and not (args.test or args.test_all):
@@ -135,6 +136,8 @@ def main():
             # Run compiler
             # Command: ./target/debug/compiler <input> -o <output>
             cmd = [compiler_binary, test_file, "-o", output_file_name]
+            if args.graph:
+                cmd.append("--graph")
             
             try:
                 result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

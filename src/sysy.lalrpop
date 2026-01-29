@@ -2,6 +2,7 @@ use crate::base::r#type::Type;
 use crate::frontend::ast::*;
 use crate::frontend::parse::*;
 use crate::utils::{is, cast_deref, cast_mut, cast};
+use std::ffi::CString;
 
 // lalrpop 里的约定
 grammar(parser: &mut Parser);
@@ -501,4 +502,8 @@ IntConst: i32 = {
 
 FloatConst: f32 = {
   r"[+-]?(?:(?:[0-9]*\.[0-9]+|[0-9]+\.)(?:[eE][+-]?[0-9]+)?|[0-9]+[eE][+-]?[0-9]+)" => str::parse::<f32>(&<>).unwrap(),
+  r"0[xX](?:[0-9a-fA-F]*\.[0-9a-fA-F]+|[0-9a-fA-F]+\.?)[pP][+-]?[0-9]+" => {
+    let c_str = CString::new(<>).unwrap();
+    unsafe { libc::strtof(c_str.as_ptr(), std::ptr::null_mut()) }
+  },
 };

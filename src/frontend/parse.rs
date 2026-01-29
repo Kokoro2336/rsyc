@@ -133,7 +133,6 @@ impl Parser {
                 Literal::Float(val) => Box::new(Literal::Float(val)),
             }
         } else if is::<VarAccess>(&*node) {
-            info!("Folding VarAccess: {:?}", node);
             let var_access = cast_mut::<VarAccess>(&mut *node).unwrap();
             if let Some(const_val) = self.syms.get(&var_access.name) {
                 if is::<Literal>(&**const_val) {
