@@ -37,7 +37,7 @@ impl Type {
             Type::Float => 4,
             Type::Void => 0,
             Type::Array { base, dims } => base.size_in_bytes() * dims.iter().product::<u32>(),
-            Type::Pointer { base } => RISCV_BITS / 8,
+            Type::Pointer { .. } => RISCV_BITS / 8,
         }
     }
 }

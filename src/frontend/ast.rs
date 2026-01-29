@@ -1,6 +1,6 @@
 use std::any::Any;
 
-use crate::base::r#type::Type;
+use crate::base::Type;
 use crate::debug::graph::GraphNode;
 
 // We can't impl Clone for dyn Node, because Clone return self, and self it's unknown at compile time.

@@ -21,7 +21,9 @@ impl<T: std::hash::Hash + Eq, U> SymbolTable<T, U> {
     }
 
     pub fn exit_scope(&mut self) {
-        self.tables.pop();
+        if self.tables.pop().is_none() {
+            panic!("No scope to exit");
+        };
     }
 
     pub fn insert(&mut self, key: T, value: U) {

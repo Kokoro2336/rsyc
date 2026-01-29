@@ -1,15 +1,16 @@
-pub mod r#type;
+pub use crate::base::r#type::Type;
 
+mod r#type;
+mod builder;
 mod context;
 mod pass;
-mod builder;
-pub use crate::base::pass::*;
-pub use crate::base::context::*;
 pub use crate::base::builder::*;
+pub use crate::base::context::*;
+pub use crate::base::pass::*;
 
-mod op;
 mod bb;
+mod op;
 pub mod ir {
-    pub use crate::base::op::*;
     pub use crate::base::bb::*;
+    pub use crate::base::op::*;
 }

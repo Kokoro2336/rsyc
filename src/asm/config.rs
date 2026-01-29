@@ -1,5 +1,3 @@
-use crate::asm::reg::RVREG_ALLOCATOR;
-
 pub const REG_IDLE: u32 = u32::MAX;
 pub const STK_FRM_BASE_LENGTH: u32 = 16; // 16 bytes for minimum
 pub const RISCV_BITS: u32 = 32;
@@ -76,7 +74,7 @@ impl std::fmt::Display for RVOp {
 
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum RVRegCode {
+pub enum Reg {
     ZERO = 0, // hardwired zero
     RA = 1,   // return address
     SP = 2,   // stack pointer
@@ -111,113 +109,54 @@ pub enum RVRegCode {
     T6 = 31, // temporaries
 }
 
-impl RVRegCode {
+impl Reg {
     pub fn is_temp(&self) -> bool {
-        (*self as u8 >= RVRegCode::T0 as u8 && *self as u8 <= RVRegCode::T2 as u8)
-            || (*self as u8 >= RVRegCode::T3 as u8 && *self as u8 <= RVRegCode::T6 as u8)
-            || (*self as u8 >= RVRegCode::A0 as u8 && *self as u8 <= RVRegCode::A7 as u8)
+        (*self as u8 >= Reg::T0 as u8 && *self as u8 <= Reg::T2 as u8)
+            || (*self as u8 >= Reg::T3 as u8 && *self as u8 <= Reg::T6 as u8)
+            || (*self as u8 >= Reg::A0 as u8 && *self as u8 <= Reg::A7 as u8)
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum RVOperandType {
-    Temp(RVRegCode), // reg temporarily allocated, often for asms transformed from the same IR.
-    Perm(RVRegCode), // reg permanently allocated, often for the reg eventually used by the whole IR.
-    Label(String),   // label for branch/jump
-    MemWithReg { offset: u32, reg: RVRegCode }, // memory location in stack frame
-    Params(Vec<Box<RVOperandType>>),
-    None, // no reg allocated
-}
-
-impl std::fmt::Display for RVOperandType {
+impl std::fmt::Display for Reg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RVOperandType::Temp(reg) => write!(f, "{}", reg),
-            RVOperandType::Perm(reg) => write!(f, "{}", reg),
-            RVOperandType::MemWithReg { offset, reg } => {
-                write!(f, "{}({})", offset, reg)
-            }
-            RVOperandType::Label(label) => write!(f, "{}", label),
-            RVOperandType::None | RVOperandType::Params(_) => write!(f, ""),
+            Reg::ZERO => write!(f, "x0"),
+            Reg::RA => write!(f, "x1"),
+            Reg::SP => write!(f, "x2"),
+            Reg::GP => write!(f, "x3"),
+            Reg::TP => write!(f, "x4"),
+            Reg::T0 => write!(f, "x5"),
+            Reg::T1 => write!(f, "x6"),
+            Reg::T2 => write!(f, "x7"),
+            Reg::S0 => write!(f, "x8"),
+            Reg::S1 => write!(f, "x9"),
+            Reg::A0 => write!(f, "x10"),
+            Reg::A1 => write!(f, "x11"),
+            Reg::A2 => write!(f, "x12"),
+            Reg::A3 => write!(f, "x13"),
+            Reg::A4 => write!(f, "x14"),
+            Reg::A5 => write!(f, "x15"),
+            Reg::A6 => write!(f, "x16"),
+            Reg::A7 => write!(f, "x17"),
+            Reg::S2 => write!(f, "x18"),
+            Reg::S3 => write!(f, "x19"),
+            Reg::S4 => write!(f, "x20"),
+            Reg::S5 => write!(f, "x21"),
+            Reg::S6 => write!(f, "x22"),
+            Reg::S7 => write!(f, "x23"),
+            Reg::S8 => write!(f, "x24"),
+            Reg::S9 => write!(f, "x25"),
+            Reg::S10 => write!(f, "x26"),
+            Reg::S11 => write!(f, "x27"),
+            Reg::T3 => write!(f, "x28"),
+            Reg::T4 => write!(f, "x29"),
+            Reg::T5 => write!(f, "x30"),
+            Reg::T6 => write!(f, "x31"),
         }
     }
 }
 
-impl RVOperandType {
-    pub fn get_reg(&self) -> RVRegCode {
-        match self {
-            RVOperandType::Temp(reg) => *reg,
-            RVOperandType::Perm(reg) => *reg,
-            RVOperandType::MemWithReg { reg, .. } => *reg,
-            RVOperandType::Label(_) => panic!("Label type has no register!"),
-            RVOperandType::Params(_) => panic!("Could not call get_reg on Params Type"),
-            RVOperandType::None => panic!("No register allocated!"),
-        }
-    }
-
-    pub fn get_offset(&self) -> u32 {
-        match self {
-            RVOperandType::MemWithReg { offset, .. } => *offset,
-            _ => panic!("Not a MemWithReg type!"),
-        }
-    }
-
-    /// this FnDecl would only free temporary registers.
-    pub fn free_temp(&self) {
-        match self {
-            RVOperandType::Temp(reg) => {
-                RVREG_ALLOCATOR.with(|allocator| allocator.borrow_mut().free_reg(*reg));
-            }
-            RVOperandType::MemWithReg { offset: _, reg } => {
-                if reg.is_temp() {
-                    RVREG_ALLOCATOR.with(|allocator| allocator.borrow_mut().free_reg(*reg));
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-impl std::fmt::Display for RVRegCode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RVRegCode::ZERO => write!(f, "x0"),
-            RVRegCode::RA => write!(f, "x1"),
-            RVRegCode::SP => write!(f, "x2"),
-            RVRegCode::GP => write!(f, "x3"),
-            RVRegCode::TP => write!(f, "x4"),
-            RVRegCode::T0 => write!(f, "x5"),
-            RVRegCode::T1 => write!(f, "x6"),
-            RVRegCode::T2 => write!(f, "x7"),
-            RVRegCode::S0 => write!(f, "x8"),
-            RVRegCode::S1 => write!(f, "x9"),
-            RVRegCode::A0 => write!(f, "x10"),
-            RVRegCode::A1 => write!(f, "x11"),
-            RVRegCode::A2 => write!(f, "x12"),
-            RVRegCode::A3 => write!(f, "x13"),
-            RVRegCode::A4 => write!(f, "x14"),
-            RVRegCode::A5 => write!(f, "x15"),
-            RVRegCode::A6 => write!(f, "x16"),
-            RVRegCode::A7 => write!(f, "x17"),
-            RVRegCode::S2 => write!(f, "x18"),
-            RVRegCode::S3 => write!(f, "x19"),
-            RVRegCode::S4 => write!(f, "x20"),
-            RVRegCode::S5 => write!(f, "x21"),
-            RVRegCode::S6 => write!(f, "x22"),
-            RVRegCode::S7 => write!(f, "x23"),
-            RVRegCode::S8 => write!(f, "x24"),
-            RVRegCode::S9 => write!(f, "x25"),
-            RVRegCode::S10 => write!(f, "x26"),
-            RVRegCode::S11 => write!(f, "x27"),
-            RVRegCode::T3 => write!(f, "x28"),
-            RVRegCode::T4 => write!(f, "x29"),
-            RVRegCode::T5 => write!(f, "x30"),
-            RVRegCode::T6 => write!(f, "x31"),
-        }
-    }
-}
-
-impl RVRegCode {
+impl Reg {
     /// Get numeric index (0..=31) for use as array index
     pub fn idx(self) -> usize {
         self as usize

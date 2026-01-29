@@ -1,4 +1,4 @@
-use crate::base::r#type::Type;
+use crate::base::Type;
 /**
  * Semantic analysis.
  * Performs type inference, add implicit cast and checks for semantic errors.
@@ -7,17 +7,20 @@ use crate::base::{Pass, SymbolTable};
 use crate::frontend::ast::*;
 use crate::utils::{cast, cast_deref, cast_mut, is, replace, take};
 
-pub struct Semantic<'a> {
+pub struct Semantic {
     pub syms: SymbolTable<String, Type>,
-    pub consts: SymbolTable<String, &'a Box<dyn Node>>,
+    pub funcs: SymbolTable<String, Box<dyn Node>>,
+    pub current_func: Option<(String, Type)>,
     pub node: Option<Box<dyn Node>>,
 }
 
-impl<'a> Semantic<'a> {
+impl Semantic {
     pub fn new(node: Box<dyn Node>) -> Self {
+        // Add the
         Self {
             syms: SymbolTable::new(),
-            consts: SymbolTable::new(),
+            funcs: SymbolTable::new(),
+            current_func: None,
             node: Some(node),
         }
     }
@@ -124,12 +127,45 @@ impl<'a> Semantic<'a> {
             }
         } else if is::<Call>(node) {
             let call = cast_mut::<Call>(node).unwrap();
-            if let Some(func_type) = self.syms.get(&call.func_name) {
-                call.typ = func_type.clone();
-                Ok(func_type.clone())
+            let (fn_params, return_typ) = if let Some(func) = self.funcs.get(&call.func_name) {
+                if let Some(fn_decl) = cast::<FnDecl>(func) {
+                    (fn_decl.params.clone(), fn_decl.return_type.clone())
+                } else {
+                    panic!("Function {} is not a FnDecl node!", call.func_name);
+                }
             } else {
                 panic!("Undefined FnDecl: {}", call.func_name);
+            };
+
+            // check argument types
+            if fn_params.len() != call.args.len() {
+                return Err(format!(
+                    "Function {} expects {} arguments, got {}",
+                    call.func_name,
+                    fn_params.len(),
+                    call.args.len()
+                ));
             }
+            for (i, arg) in call.args.iter_mut().enumerate() {
+                let arg_type = self.analyze(arg)?;
+                let param_type = &fn_params[i].1;
+                if (arg_type == Type::Void) ^ (param_type == &Type::Void) {
+                    return Err(format!(
+                        "Argument type mismatch in function {}: expected {:?}, got {:?}",
+                        call.func_name, param_type, arg_type
+                    ));
+                } else if arg_type != *param_type {
+                    // insert implicit cast
+                    *arg = Box::new(UnaryOp {
+                        typ: param_type.clone(),
+                        op: Op::Cast(arg_type, param_type.clone()),
+                        operand: take(arg),
+                    });
+                }
+            }
+
+            call.typ = return_typ.clone();
+            Ok(return_typ)
         } else if is::<ArrayAccess>(node) {
             let array_access = cast_mut::<ArrayAccess>(node).unwrap();
             let array_type = self.syms.get(&array_access.name).unwrap_or_else(|| {
@@ -161,8 +197,12 @@ impl<'a> Semantic<'a> {
             let func = cast_mut::<FnDecl>(node).unwrap();
             self.syms
                 .insert(func.name.clone(), func.return_type.clone());
-            self.analyze(&mut func.body);
-            self.syms.exit_scope();
+            // insert function node into funcs symbol table
+            self.funcs.insert(func.name.clone(), Box::new(func.clone()));
+            // add current function info
+            self.current_func = Some((func.name.clone(), func.return_type.clone()));
+
+            self.analyze(&mut func.body)?;
             Ok(Type::Void)
         } else if is::<VarDecl>(node) {
             let var_decl = cast_mut::<VarDecl>(node).unwrap();
@@ -285,9 +325,25 @@ impl<'a> Semantic<'a> {
             self.analyze(&mut while_stmt.body)?;
             Ok(Type::Void)
         } else if is::<Return>(node) {
+            // check whether the function return type matches
             let ret = cast_mut::<Return>(node).unwrap();
             if let Some(expr) = &mut ret.0 {
-                self.analyze(expr)?;
+                let ret_typ = self.analyze(expr)?;
+                if (self.current_func.as_ref().unwrap().1 == Type::Void) ^ (ret_typ == Type::Void) {
+                    return Err(format!(
+                        "Return type mismatch in function {}: expected {:?}, got {:?}",
+                        self.current_func.as_ref().unwrap().0,
+                        self.current_func.as_ref().unwrap().1,
+                        ret_typ
+                    ));
+                } else if self.current_func.as_ref().unwrap().1 != ret_typ {
+                    // insert implicit cast if necessary
+                    ret.0 = Some(Box::new(UnaryOp {
+                        typ: self.current_func.as_ref().unwrap().1.clone(),
+                        op: Op::Cast(ret_typ, self.current_func.as_ref().unwrap().1.clone()),
+                        operand: take(expr),
+                    }));
+                }
             }
             Ok(Type::Void)
         } else if is::<Assign>(node) {
@@ -308,10 +364,9 @@ impl<'a> Semantic<'a> {
             Ok(Type::Void)
         }
     }
-
 }
 
-impl Pass<Box<dyn Node>> for Semantic<'_> {
+impl Pass<Box<dyn Node>> for Semantic {
     fn run(&mut self) -> Result<Box<dyn Node>, String> {
         let mut node = self.node.take().unwrap();
         self.analyze(&mut node);

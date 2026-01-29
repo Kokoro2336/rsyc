@@ -1,8 +1,8 @@
-use std::cell::RefCell;
 use std::vec::Vec;
 
+use crate::asm::config::Reg;
 use crate::base::ir::BBId;
-use crate::debug::error;
+use crate::base::Type;
 use crate::utils::arena::*;
 
 pub type OpId = usize;
@@ -10,6 +10,14 @@ pub type DFG = IndexedArena<Op>;
 
 #[derive(Debug, Clone)]
 pub enum OpData {
+    // customized instructions for convenience
+    GetGlobal(OpId),
+    GetArg(OpId),
+    // for immediate values
+    Int(i32),
+    Float(f32),
+
+    // regular instructions
     Ne {
         lhs: OpId,
         rhs: OpId,
@@ -53,7 +61,7 @@ pub enum OpData {
     Mod {
         lhs: OpId,
         rhs: OpId,
-    }, // arithmetic
+    },
     And {
         lhs: OpId,
         rhs: OpId,
@@ -89,7 +97,6 @@ pub enum OpData {
         size: usize,
     },
     Call {
-        func: String,
         args: Vec<OpId>,
     },
     Br {
@@ -100,22 +107,19 @@ pub enum OpData {
     Jump {
         target_bb: BBId,
     },
-    GetPtr {
-        base: OpId,
-        offset: OpId,
-    },
-    GetElemPtr {
-        base: OpId,
-        index: OpId,
-    },
     Ret {
         value: Option<OpId>,
     },
 }
 
-impl std::fmt::Display for OpData {
+impl std::fmt::Display for Op {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
+        match &self.data {
+            OpData::Int(val) => write!(f, "{}", val),
+            OpData::Float(val) => write!(f, "{}", val),
+            OpData::GetGlobal(addr) => write!(f, "get_global {}", addr),
+            OpData::GetArg(addr) => write!(f, "get_arg {}", addr),
+
             OpData::Ne { lhs, rhs } => write!(f, "ne {}, {}", lhs, rhs),
             OpData::Eq { lhs, rhs } => write!(f, "eq {}, {}", lhs, rhs),
             OpData::Gt { lhs, rhs } => write!(f, "gt {}, {}", lhs, rhs),
@@ -136,15 +140,32 @@ impl std::fmt::Display for OpData {
             OpData::Store { addr, value } => write!(f, "store {}, {}", addr, value),
             OpData::Load { addr } => write!(f, "load {}", addr),
             OpData::Alloca { size } => write!(f, "alloc {}", size),
-            OpData::Call { func, args } => write!(f, "call {} {:?}", func, args),
+            OpData::Call { args } => {
+                write!(
+                    f,
+                    "call {} {:?}",
+                    self.attrs
+                        .iter()
+                        .find(|attr| matches!(attr, Attr::Symbol(_)))
+                        .map(|attr| {
+                            if let Attr::Symbol(name) = attr {
+                                name.clone()
+                            } else {
+                                "".to_string()
+                            }
+                        })
+                        .unwrap_or_else(
+                            || Err("Call op missing symbol attribute".to_string()).unwrap()
+                        ),
+                    args
+                )
+            }
             OpData::Br {
                 cond,
                 then_bb,
                 else_bb,
             } => write!(f, "br {}, {}, {}", cond, then_bb, else_bb),
             OpData::Jump { target_bb } => write!(f, "jump {}", target_bb),
-            OpData::GetPtr { base, offset } => write!(f, "getptr {}, {}", base, offset),
-            OpData::GetElemPtr { base, index } => write!(f, "getelemptr {}, {}", base, index),
             OpData::Ret { value } => write!(f, "ret {:?}", value),
         }
     }
@@ -152,9 +173,43 @@ impl std::fmt::Display for OpData {
 
 pub struct Op {
     pub prev: Option<OpId>,
+    pub typ: Type,
+    pub attrs: Vec<Attr>,
     pub data: OpData,
     pub uses: Vec<OpId>,
     pub next: Option<OpId>,
+}
+
+impl Op {
+    pub fn new(
+        typ: Type,
+        attrs: Vec<Attr>,
+        data: OpData,
+    ) -> Self {
+        Self {
+            prev: None,
+            typ,
+            attrs,
+            data,
+            uses: vec![],
+            next: None,
+        }
+    }
+}
+
+// attributes of instructions
+pub enum Attr {
+    PhysReg(Reg),
+    Symbol(String),
+}
+
+impl std::fmt::Display for Attr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Attr::PhysReg(reg) => write!(f, "<phys_reg = {}>", reg),
+            Attr::Symbol(name) => write!(f, "<symbol = {}>", name),
+        }
+    }
 }
 
 // impl dfg

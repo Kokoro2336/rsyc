@@ -1,4 +1,4 @@
-use crate::base::r#type::Type;
+use crate::base::Type;
 use crate::base::SymbolTable;
 use crate::debug::{error, info};
 use crate::frontend::ast::*;

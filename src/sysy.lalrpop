@@ -1,4 +1,4 @@
-use crate::base::r#type::Type;
+use crate::base::Type;
 use crate::frontend::ast::*;
 use crate::frontend::parse::*;
 use crate::utils::{is, cast_deref, cast_mut, cast};
