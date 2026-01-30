@@ -1,5 +1,5 @@
-use crate::base::Type;
 use crate::base::SymbolTable;
+use crate::base::Type;
 use crate::debug::{error, info};
 use crate::frontend::ast::*;
 use crate::utils::{cast, cast_deref, cast_mut, is};
@@ -89,6 +89,9 @@ impl Parser {
                         };
                         Box::new(Literal::Float(result))
                     }
+                    _ => unreachable!(
+                        "Unsupported literal types occur in constant folding"
+                    ),
                 }
             } else {
                 panic!("Non-constant folding operation: {:?}", bin_op.op);
@@ -122,6 +125,12 @@ impl Parser {
                         };
                         Box::new(Literal::Float(result))
                     }
+                    Literal::String(_) => {
+                        unreachable!(
+                            "Unsupported unary operation for constant folding on String: {:?}",
+                            un_op.op
+                        );
+                    }
                 }
             } else {
                 panic!("Non-constant folding unary operation: {:?}", un_op.op);
@@ -131,6 +140,9 @@ impl Parser {
             match *lit_node {
                 Literal::Int(val) => Box::new(Literal::Int(val)),
                 Literal::Float(val) => Box::new(Literal::Float(val)),
+                Literal::String(ref val) => {
+                    unreachable!("String literal folding is not supported yet: {}", val)
+                }
             }
         } else if is::<VarAccess>(&*node) {
             let var_access = cast_mut::<VarAccess>(&mut *node).unwrap();
@@ -140,6 +152,12 @@ impl Parser {
                     match *lit {
                         Literal::Int(val) => return Box::new(Literal::Int(val)),
                         Literal::Float(val) => return Box::new(Literal::Float(val)),
+                        Literal::String(_) => {
+                            unreachable!(
+                                "String literal folding is not supported yet: {}",
+                                var_access.name
+                            );
+                        }
                     }
                     // only supports literal folding
                 } else {
@@ -193,6 +211,9 @@ impl Parser {
                                         "Array index must be integer literal, found float: {}",
                                         idx
                                     );
+                                }
+                                Literal::String(_) => {
+                                    panic!("Array index must be integer literal, found string");
                                 }
                             }
                         } else {

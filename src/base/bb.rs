@@ -8,15 +8,46 @@ pub struct Program {
     pub funcs: Vec<Function>,
 }
 
+impl Program {
+    pub fn new() -> Self {
+        Self { funcs: vec![] }
+    }
+}
+
+impl Default for Program {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct Function {
     pub cfg: CFG,
     pub dfg: DFG,
+}
+
+impl Function {
+    pub fn new() -> Self {
+        Self {
+            cfg: IndexedArena::new(),
+            dfg: DFG::new(),
+        }
+    }
 }
 
 pub struct BasicBlock {
     pub preds: Vec<BBId>,
     pub cur: Vec<OpId>,
     pub succs: Vec<BBId>,
+}
+
+impl BasicBlock {
+    pub fn new() -> Self {
+        Self {
+            preds: vec![],
+            cur: vec![],
+            succs: vec![],
+        }
+    }
 }
 
 // impl cfg

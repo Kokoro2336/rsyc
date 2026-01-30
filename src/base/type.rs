@@ -6,8 +6,19 @@ pub enum Type {
     Int,
     Void,
     Float,
-    Array { base: Box<Type>, dims: Vec<u32> },
-    Pointer { base: Box<Type> },
+    Array {
+        base: Box<Type>,
+        dims: Vec<u32>,
+    },
+    Pointer {
+        base: Box<Type>,
+    },
+    Function {
+        return_type: Box<Type>,
+        param_types: Vec<Type>,
+    },
+    // only occurs in SysY lib function
+    String,
 }
 
 impl std::fmt::Display for Type {
@@ -26,6 +37,22 @@ impl std::fmt::Display for Type {
             Type::Pointer { base } => {
                 write!(f, "{}*", base)
             }
+            Type::Function {
+                return_type,
+                param_types,
+            } => {
+                write!(f, "fn(")?;
+                for (i, param) in param_types.iter().enumerate() {
+                    write!(f, "{}", param)?;
+                    if i != param_types.len() - 1 {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, ") -> {}", return_type)
+            }
+            Type::String => {
+                write!(f, "string")
+            }
         }
     }
 }
@@ -38,6 +65,8 @@ impl Type {
             Type::Void => 0,
             Type::Array { base, dims } => base.size_in_bytes() * dims.iter().product::<u32>(),
             Type::Pointer { .. } => RISCV_BITS / 8,
+            Type::Function { .. } => panic!("Function type has no size"),
+            Type::String => panic!("String type has no size"),
         }
     }
 }

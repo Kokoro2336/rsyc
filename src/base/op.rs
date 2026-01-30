@@ -12,113 +12,84 @@ pub type DFG = IndexedArena<Op>;
 pub enum OpData {
     // customized instructions for convenience
     GetGlobal(OpId),
-    GetArg(OpId),
+    GetArg,
     // for immediate values
-    Int(i32),
-    Float(f32),
+    Int,
+    Float,
 
     // regular instructions
-    Ne {
-        lhs: OpId,
-        rhs: OpId,
-    },
-    Eq {
-        lhs: OpId,
-        rhs: OpId,
-    },
-    Gt {
-        lhs: OpId,
-        rhs: OpId,
-    },
-    Lt {
-        lhs: OpId,
-        rhs: OpId,
-    },
-    Ge {
-        lhs: OpId,
-        rhs: OpId,
-    },
-    Le {
-        lhs: OpId,
-        rhs: OpId,
-    },
-    Add {
-        lhs: OpId,
-        rhs: OpId,
-    },
-    Sub {
-        lhs: OpId,
-        rhs: OpId,
-    },
-    Mul {
-        lhs: OpId,
-        rhs: OpId,
-    },
-    Div {
-        lhs: OpId,
-        rhs: OpId,
-    },
-    Mod {
-        lhs: OpId,
-        rhs: OpId,
-    },
-    And {
-        lhs: OpId,
-        rhs: OpId,
-    },
-    Or {
-        lhs: OpId,
-        rhs: OpId,
-    },
-    Xor {
-        lhs: OpId,
-        rhs: OpId,
-    }, // bitwise
-    Shl {
-        lhs: OpId,
-        rhs: OpId,
-    },
-    Shr {
-        lhs: OpId,
-        rhs: OpId,
-    },
-    Sar {
-        lhs: OpId,
-        rhs: OpId,
-    }, // bitwise shift
-    Store {
-        addr: OpId,
-        value: OpId,
-    },
-    Load {
-        addr: OpId,
-    },
-    Alloca {
-        size: usize,
-    },
-    Call {
-        args: Vec<OpId>,
-    },
-    Br {
-        cond: OpId,
-        then_bb: BBId,
-        else_bb: BBId,
-    },
-    Jump {
-        target_bb: BBId,
-    },
-    Ret {
-        value: Option<OpId>,
-    },
+    Ne { lhs: OpId, rhs: OpId },
+    Eq { lhs: OpId, rhs: OpId },
+    Gt { lhs: OpId, rhs: OpId },
+    Lt { lhs: OpId, rhs: OpId },
+    Ge { lhs: OpId, rhs: OpId },
+    Le { lhs: OpId, rhs: OpId },
+    Add { lhs: OpId, rhs: OpId },
+    Sub { lhs: OpId, rhs: OpId },
+    Mul { lhs: OpId, rhs: OpId },
+    Div { lhs: OpId, rhs: OpId },
+    Mod { lhs: OpId, rhs: OpId },
+    And { lhs: OpId, rhs: OpId },
+    Or { lhs: OpId, rhs: OpId },
+    Xor { lhs: OpId, rhs: OpId }, // bitwise
+    Shl { lhs: OpId, rhs: OpId },
+    Shr { lhs: OpId, rhs: OpId },
+    Sar { lhs: OpId, rhs: OpId }, // bitwise shift
+    Store { addr: OpId, value: OpId },
+    Load { addr: OpId },
+    Alloca,
+    Call { args: Vec<OpId> },
+    Br { cond: OpId },
+    Jump,
+    Ret { value: Option<OpId> },
 }
 
 impl std::fmt::Display for Op {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.data {
-            OpData::Int(val) => write!(f, "{}", val),
-            OpData::Float(val) => write!(f, "{}", val),
+            OpData::Int => write!(
+                f,
+                "{}",
+                self.attrs
+                    .iter()
+                    .find_map(|attr| {
+                        if let Attr::Int(val) = attr {
+                            Some(val)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(&0)
+            ),
+            OpData::Float => write!(
+                f,
+                "{}",
+                self.attrs
+                    .iter()
+                    .find_map(|attr| {
+                        if let Attr::Float(val) = attr {
+                            Some(val)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(&0.0)
+            ),
             OpData::GetGlobal(addr) => write!(f, "get_global {}", addr),
-            OpData::GetArg(addr) => write!(f, "get_arg {}", addr),
+            OpData::GetArg => write!(
+                f,
+                "get_arg {}",
+                self.attrs
+                    .iter()
+                    .find_map(|attr| {
+                        if let Attr::Param(idx) = attr {
+                            Some(idx)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(&0)
+            ),
 
             OpData::Ne { lhs, rhs } => write!(f, "ne {}, {}", lhs, rhs),
             OpData::Eq { lhs, rhs } => write!(f, "eq {}, {}", lhs, rhs),
@@ -139,16 +110,29 @@ impl std::fmt::Display for Op {
             OpData::Sar { lhs, rhs } => write!(f, "sar {}, {}", lhs, rhs),
             OpData::Store { addr, value } => write!(f, "store {}, {}", addr, value),
             OpData::Load { addr } => write!(f, "load {}", addr),
-            OpData::Alloca { size } => write!(f, "alloc {}", size),
+            OpData::Alloca => write!(
+                f,
+                "alloc {}",
+                self.attrs
+                    .iter()
+                    .find_map(|attr| {
+                        if let Attr::Size(size) = attr {
+                            Some(size)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(&0)
+            ),
             OpData::Call { args } => {
                 write!(
                     f,
                     "call {} {:?}",
                     self.attrs
                         .iter()
-                        .find(|attr| matches!(attr, Attr::Symbol(_)))
+                        .find(|attr| matches!(attr, Attr::Function(_)))
                         .map(|attr| {
-                            if let Attr::Symbol(name) = attr {
+                            if let Attr::Function(name) = attr {
                                 name.clone()
                             } else {
                                 "".to_string()
@@ -160,12 +144,49 @@ impl std::fmt::Display for Op {
                     args
                 )
             }
-            OpData::Br {
+            OpData::Br { cond } => write!(
+                f,
+                "br {}, {}, {}",
                 cond,
-                then_bb,
-                else_bb,
-            } => write!(f, "br {}, {}, {}", cond, then_bb, else_bb),
-            OpData::Jump { target_bb } => write!(f, "jump {}", target_bb),
+                self.attrs
+                    .iter()
+                    .find_map(|attr| {
+                        if let Attr::Branch { then_bb, .. } = attr {
+                            Some(then_bb)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(&0),
+                self.attrs
+                    .iter()
+                    .find_map(|attr| {
+                        if let Attr::Branch {
+                            else_bb: Some(else_bb),
+                            ..
+                        } = attr
+                        {
+                            Some(else_bb)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(&0)
+            ),
+            OpData::Jump => write!(
+                f,
+                "jump {}",
+                self.attrs
+                    .iter()
+                    .find_map(|attr| {
+                        if let Attr::Jump(target_bb) = attr {
+                            Some(target_bb)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(&0)
+            ),
             OpData::Ret { value } => write!(f, "ret {:?}", value),
         }
     }
@@ -181,11 +202,7 @@ pub struct Op {
 }
 
 impl Op {
-    pub fn new(
-        typ: Type,
-        attrs: Vec<Attr>,
-        data: OpData,
-    ) -> Self {
+    pub fn new(typ: Type, attrs: Vec<Attr>, data: OpData) -> Self {
         Self {
             prev: None,
             typ,
@@ -199,15 +216,44 @@ impl Op {
 
 // attributes of instructions
 pub enum Attr {
+    // for pysical register allocation
     PhysReg(Reg),
-    Symbol(String),
+    // for call
+    Function(String),
+    // for Branch
+    Branch {
+        then_bb: BBId,
+        else_bb: Option<BBId>,
+    },
+    // for Jump
+    Jump(BBId),
+    // for GetArg
+    Param(u32),
+    // for Alloca
+    Size(u32),
+    // for int
+    Int(i32),
+    // for float
+    Float(f32),
 }
 
 impl std::fmt::Display for Attr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Attr::PhysReg(reg) => write!(f, "<phys_reg = {}>", reg),
-            Attr::Symbol(name) => write!(f, "<symbol = {}>", name),
+            Attr::Function(name) => write!(f, "<function = {}>", name),
+            Attr::Branch { then_bb, else_bb } => {
+                if let Some(else_bb) = else_bb {
+                    write!(f, "<branch then: {}, else: {}>", then_bb, else_bb)
+                } else {
+                    write!(f, "<branch then: {}>", then_bb)
+                }
+            }
+            Attr::Jump(target_bb) => write!(f, "<jump target: {}>", target_bb),
+            Attr::Param(idx) => write!(f, "<param idx: {}>", idx),
+            Attr::Size(size) => write!(f, "<alloca size: {}>", size),
+            Attr::Int(val) => write!(f, "<int: {}>", val),
+            Attr::Float(val) => write!(f, "<float: {}>", val),
         }
     }
 }
@@ -293,30 +339,68 @@ impl Arena<Op> for IndexedArena<Op> {
 }
 
 impl IndexedArena<Op> {
-    pub fn insert_at(&mut self, idx: OpId, mut data: Op) -> Result<OpId, String> {
-        let mut prev_idx = None;
-        if let Some(node) = self.get(idx)? {
-            prev_idx = node.prev;
-        }
-        // update data's links
-        data.prev = prev_idx;
-        data.next = Some(idx);
-
-        let index = self.alloc(data)?;
-
-        // update the surrounding nodes
-        if let Some(prev) = prev_idx {
-            if let Some(node) = self.get_mut(prev)? {
-                node.next = Some(index);
+    // insert at the front of idx. If idx is None, insert at the end.
+    pub fn insert_at(&mut self, idx: Option<OpId>, mut data: Op) -> Result<OpId, String> {
+        if let Some(id) = idx {
+            let mut prev_idx = None;
+            if let Some(node) = self.get(id)? {
+                prev_idx = node.prev;
             }
+            // update data's links
+            data.prev = prev_idx;
+            data.next = Some(id);
+
+            let index = self.alloc(data)?;
+
+            // update the surrounding nodes
+            if let Some(prev) = prev_idx {
+                if let Some(node) = self.get_mut(prev)? {
+                    node.next = Some(index);
+                }
+            } else {
+                self.head = Some(index);
+            }
+
+            if let Some(node) = self.get_mut(id)? {
+                node.prev = Some(index);
+            }
+
+            Ok(index)
         } else {
-            self.head = Some(index);
-        }
+            let mut tail_idx = None;
+            let mut curr = self.head;
+            while let Some(c) = curr {
+                tail_idx = Some(c);
+                if let Some(node) = self.get(c)? {
+                    curr = node.next;
+                } else {
+                    break;
+                }
+            }
 
-        if let Some(node) = self.get_mut(idx)? {
-            node.prev = Some(index);
-        }
+            data.prev = tail_idx;
+            data.next = None;
 
-        Ok(index)
+            let index = self.alloc(data)?;
+
+            if let Some(tail) = tail_idx {
+                if let Some(node) = self.get_mut(tail)? {
+                    node.next = Some(index);
+                }
+            } else {
+                self.head = Some(index);
+            }
+
+            Ok(index)
+        }
+    }
+
+    pub fn add_use(&mut self, op_idx: OpId, use_idx: OpId) -> Result<(), String> {
+        if let Some(node) = self.get_mut(op_idx)? {
+            node.uses.push(use_idx);
+            Ok(())
+        } else {
+            Err("DFG add_use: op index not found".to_string())
+        }
     }
 }

@@ -222,6 +222,7 @@ dependencies = [
  "lalrpop",
  "lalrpop-util",
  "libc",
+ "regex",
  "textwrap",
  "tool",
  "tracing",

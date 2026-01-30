@@ -67,12 +67,16 @@ GlobalObj: Box<dyn Node> = {
 FuncDef: Box<dyn Node> = {
   <b_type: BType> <ident: Ident> "(" <func_fparams: FuncFParams> ")" <block: Block> => {
     // construct FuncDef struct, using shorthand <> to pass all named fields
+    let param_types = func_fparams.iter().map(|(_, t)| t.clone()).collect();
     Box::new(
       FnDecl { 
         name: ident,
         params: func_fparams,
+        typ: Type::Function {
+          return_type: Box::new(b_type.clone()),
+          param_types,
+        },
         body: block,
-        return_type: b_type,
       }
     )
   },
@@ -83,17 +87,24 @@ FuncDef: Box<dyn Node> = {
         name: ident,
         params: vec![],
         body: block,
-        return_type: b_type,
+        typ: Type::Function {
+          return_type: Box::new(b_type.clone()),
+          param_types: vec![],
+        },
       }
     )
   },
   "void" <ident: Ident> "(" <func_fparams: FuncFParams> ")" <block: Block> => {
+    let param_types = func_fparams.iter().map(|(_, t)| t.clone()).collect();
     Box::new(
       FnDecl { 
         name: ident,
         params: func_fparams,
         body: block,
-        return_type: Type::Void,
+        typ: Type::Function {
+          return_type: Box::new(Type::Void),
+          param_types,
+        },
       }
     )
   },
@@ -103,7 +114,10 @@ FuncDef: Box<dyn Node> = {
         name: ident,
         params: vec![],
         body: block,
-        return_type: Type::Void,
+        typ: Type::Function {
+          return_type: Box::new(Type::Void),
+          param_types: vec![],
+        },
       }
     )
   },
@@ -488,6 +502,7 @@ AddOp: Op = {
 Number: Box<dyn Node> = {
   <int: IntConst> => Box::new(Literal::Int(int)),
   <float: FloatConst> => Box::new(Literal::Float(float)),
+  <fmt_string: FormattedString> => Box::new(Literal::String(fmt_string)),
 }
 
 Ident: String = <s: r"[_a-zA-Z][_a-zA-Z0-9]*"> => {
@@ -507,3 +522,7 @@ FloatConst: f32 = {
     unsafe { libc::strtof(c_str.as_ptr(), std::ptr::null_mut()) }
   },
 };
+
+FormattedString: String = {
+  r"%([-+ #0]*)([\d]+|\*)?(?:\.([\d]+|\*))?(hh|ll|[hlLzjt])?([dcf])" => <>.to_string(),
+}

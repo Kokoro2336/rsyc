@@ -1,3 +1,4 @@
+use crate::base::Type;
 use crate::debug::graph::{
     self, attr, id, Attribute, Edge, EdgeTy, GraphNode, Id, NodeId, Stmt, Vertex,
 };
@@ -23,7 +24,12 @@ impl GraphNode for FnDecl {
                             .map(|x| format!("{} {}", x.1, x.0))
                             .collect::<Vec<String>>()
                             .join("; "),
-                        self.return_type
+                        match self.typ {
+                            Type::Function {
+                                ref return_type, ..
+                            } => return_type.as_ref(),
+                            _ => &Type::Void,
+                        }
                     )
                 }),
                 attr!("shape", "box"),
@@ -597,6 +603,7 @@ impl GraphNode for Literal {
         let label = match self {
             Literal::Int(val) => format!("\"Literal: Int({})\"", val),
             Literal::Float(val) => format!("\"Literal: Float({})\"", val),
+            Literal::String(val) => format!("\"Literal: String({})\"", val),
         };
 
         stmts.push(Stmt::Node(graph::Node::new(

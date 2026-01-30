@@ -28,7 +28,7 @@ impl Clone for Box<dyn Node> {
 pub struct FnDecl {
     pub name: String,
     pub params: Vec<(String, Type)>,
-    pub return_type: Type,
+    pub typ: Type,
     pub body: Box<dyn Node>,
 }
 
@@ -128,10 +128,11 @@ pub struct ArrayAccess {
 #[derive(Debug, Clone)]
 pub struct Empty();
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Literal {
     Int(i32),
     Float(f32),
+    String(String),
 }
 
 impl Literal {
