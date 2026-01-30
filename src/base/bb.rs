@@ -2,15 +2,19 @@ use crate::base::ir::{OpId, DFG};
 use crate::utils::arena::*;
 
 pub type BBId = usize;
+pub type GlobalId = usize;
 pub type CFG = IndexedArena<BasicBlock>;
 
 pub struct Program {
+    // global vars
+    pub globals: DFG,
+    // global funcs
     pub funcs: Vec<Function>,
 }
 
 impl Program {
     pub fn new() -> Self {
-        Self { funcs: vec![] }
+        Self { globals: DFG::new(), funcs: vec![] }
     }
 }
 

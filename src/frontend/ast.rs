@@ -92,6 +92,7 @@ pub struct Call {
 pub struct VarDecl {
     pub name: String,
     pub typ: Type,
+    pub is_global: bool,
     pub mutable: bool,
     pub init_value: Option<Box<dyn Node>>,
 }

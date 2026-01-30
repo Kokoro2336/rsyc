@@ -94,7 +94,8 @@ impl Builder {
                 dfg.add_use(rhs, op)?;
             }
 
-            _ => { /* no uses to add */ }
+            // GlobalAlloca: Do not maintain uses for global alloca
+            _ => { /* do nothing */}
         }
         Ok(())
     }
@@ -102,12 +103,11 @@ impl Builder {
     // create an instruction after current instruction
     pub fn create(
         &mut self,
-        func: &mut Function,
+        dfg: &mut DFG,
         typ: Type,
         attrs: Vec<Attr>,
         data: OpData,
     ) -> Result<OpId, String> {
-        let dfg = &mut func.dfg;
         // append_at will update the prev and next pointers accordingly
         let op_id = dfg.insert_at(self.current_inst, Op::new(typ, attrs, data))?;
         // update current_inst to the newly created instruction

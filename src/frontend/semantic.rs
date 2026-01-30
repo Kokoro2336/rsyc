@@ -5,15 +5,15 @@ use crate::base::Type;
  */
 use crate::base::{Pass, SymbolTable};
 use crate::frontend::ast::*;
-use crate::utils::{cast, cast_deref, cast_mut, is, replace, take};
-use crate::debug::info;
+use crate::utils::{cast, cast_mut, is, replace, take};
 
 use regex::Regex;
 
 pub struct Semantic {
-    pub syms: SymbolTable<String, Type>,
-    pub current_func: Option<String>,
     pub node: Option<Box<dyn Node>>,
+    syms: SymbolTable<String, Type>,
+    // func_name: String, param_names: Vec<String>, param_added: bool
+    current_func: Option<String>,
 }
 
 impl Semantic {
@@ -246,14 +246,18 @@ impl Semantic {
             let func = cast_mut::<FnDecl>(node).unwrap();
             self.syms
                 .insert(func.name.clone(), func.typ.clone());
+            // enter the scope created for function itself, which is 1 level higher than the function body scope
+            self.syms.enter_scope();
+
             // insert parameters into symbol table
-            func.params.iter().for_each(|param| {
+            for param in &func.params {
                 self.syms.insert(param.0.clone(), param.1.clone());
-            });
+            }
             // add current function info
             self.current_func = Some(func.name.clone());
-
             self.analyze(&mut func.body)?;
+
+            self.syms.exit_scope();
             Ok(Type::Void)
         } else if is::<VarDecl>(node) {
             let var_decl = cast_mut::<VarDecl>(node).unwrap();
@@ -338,12 +342,10 @@ impl Semantic {
         } else if is::<Block>(node) {
             let block = cast_mut::<Block>(node).unwrap();
             self.syms.enter_scope();
-            info!("Enter new scope, depth");
             for stmt in &mut block.statements {
                 self.analyze(stmt)?;
             }
             self.syms.exit_scope();
-            info!("Exit scope, depth");
             Ok(Type::Void)
         } else if is::<If>(node) {
             let if_stmt = cast_mut::<If>(node).unwrap();
@@ -384,7 +386,7 @@ impl Semantic {
                 let ret_typ = self.analyze(expr)?;
                 let func_typ = self
                     .syms
-                    .get(self.current_func.as_ref().unwrap())
+                    .get(&self.current_func.as_ref().unwrap())
                     .unwrap()
                     .clone();
                 let func_ret_typ = match func_typ {

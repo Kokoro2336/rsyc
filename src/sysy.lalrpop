@@ -29,8 +29,25 @@ pub CompUnit: Box<dyn Node> = {
             if is::<DeclAggr>(&*obj) {
               let decl_aggr = cast_deref::<DeclAggr>(obj).unwrap();
               for mut decl in decl_aggr.decls.into_iter() {
+                // overwrite is_global field
                 if let Some(var_array) = cast_mut::<VarArray>(&mut decl) {
                   var_array.is_global = true;
+                } else if let Some(var_decl) = cast_mut::<VarDecl>(&mut decl) {
+                  var_decl.is_global = true;
+                  // fold mutable global variable initializers
+                  if var_decl.mutable {
+                    // if no initializer, set to zero
+                    if var_decl.init_value.is_none() {
+                      var_decl.init_value = match &var_decl.typ {
+                        Type::Int | Type::Float => Some(Box::new(Literal::Int(0))),
+                        Type::Pointer { .. } => Some(Box::new(Literal::Int(0))),
+                        _ => None,
+                      };
+                    } else {
+                      // fold the initializer
+                      decl = &*parser.fold(var_decl);
+                    }
+                  }
                 }
                 vec.push(decl);
               }

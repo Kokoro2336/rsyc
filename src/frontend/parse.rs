@@ -89,9 +89,7 @@ impl Parser {
                         };
                         Box::new(Literal::Float(result))
                     }
-                    _ => unreachable!(
-                        "Unsupported literal types occur in constant folding"
-                    ),
+                    _ => unreachable!("Unsupported literal types occur in constant folding"),
                 }
             } else {
                 panic!("Non-constant folding operation: {:?}", bin_op.op);
@@ -249,6 +247,8 @@ impl Parser {
                 // Dispatch constant and non-constant here.
                 let mut var_decl = Box::new(VarDecl {
                     name: raw_decl.ident,
+                    // this will be overwritten later.
+                    is_global: false,
                     typ: aggr_typ.clone(),
                     mutable: node.mutable,
                     init_value: raw_decl.init_val,

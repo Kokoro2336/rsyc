@@ -1,17 +1,19 @@
 use std::vec::Vec;
 
 use crate::asm::config::Reg;
-use crate::base::ir::BBId;
+use crate::base::ir::{BBId, GlobalId};
 use crate::base::Type;
 use crate::utils::arena::*;
 
 pub type OpId = usize;
+pub type ParamId = u32;
 pub type DFG = IndexedArena<Op>;
 
 #[derive(Debug, Clone)]
 pub enum OpData {
     // customized instructions for convenience
-    GetGlobal(OpId),
+    GetGlobal(GlobalId),
+    GlobalAlloca,
     GetArg,
     // for immediate values
     Int,
@@ -89,6 +91,20 @@ impl std::fmt::Display for Op {
                         }
                     })
                     .unwrap_or(&0)
+            ),
+            OpData::GlobalAlloca => write!(
+                f,
+                "global_alloc {}",
+                self.attrs
+                    .iter()
+                    .find_map(|attr| {
+                        if let Attr::Symbol(name) = attr {
+                            Some(name)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(&"".to_string())
             ),
 
             OpData::Ne { lhs, rhs } => write!(f, "ne {}, {}", lhs, rhs),
@@ -225,6 +241,7 @@ pub enum Attr {
         then_bb: BBId,
         else_bb: Option<BBId>,
     },
+    Symbol(String),
     // for Jump
     Jump(BBId),
     // for GetArg
@@ -249,6 +266,7 @@ impl std::fmt::Display for Attr {
                     write!(f, "<branch then: {}>", then_bb)
                 }
             }
+            Attr::Symbol(name) => write!(f, "<symbol = {}>", name),
             Attr::Jump(target_bb) => write!(f, "<jump target: {}>", target_bb),
             Attr::Param(idx) => write!(f, "<param idx: {}>", idx),
             Attr::Size(size) => write!(f, "<alloca size: {}>", size),
