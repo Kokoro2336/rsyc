@@ -524,5 +524,5 @@ FloatConst: f32 = {
 };
 
 FormattedString: String = {
-  r"%([-+ #0]*)([\d]+|\*)?(?:\.([\d]+|\*))?(hh|ll|[hlLzjt])?([dcf])" => <>.to_string(),
+  r"%([-+#0]*)([\d]+|\*)?(?:\.([\d]+|\*))?(hh|ll|[hlLzjt])?([dcf])" => <>.to_string(),
 }
