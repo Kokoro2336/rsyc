@@ -9,6 +9,12 @@ pub struct Builder {
     pub current_inst: Option<OpId>,
 }
 
+pub struct BuilderContext<'a> {
+    pub cfg: Option<&'a mut CFG>,
+    pub dfg: Option<&'a mut DFG>,
+    pub globals: &'a mut DFG,
+}
+
 impl Builder {
     pub fn new() -> Self {
         Self {
@@ -36,17 +42,56 @@ impl Builder {
 
     pub fn set_current_block(&mut self, block_id: BBId) {
         self.current_block = Some(block_id);
+        // update current_inst, set to end of the block by default(Since we don't know whether the block has instructions or not)
+        self.current_inst = None;
     }
 
     // set builder's location before inst
-    pub fn set_before_inst(&mut self, inst_id: OpId) {
-        self.current_inst = Some(inst_id);
+    // current_inst must be an instruction in the current block
+    pub fn set_before_inst(
+        &mut self,
+        ctx: &mut BuilderContext,
+        inst_id: Option<OpId>,
+    ) -> Result<(), String> {
+        let cfg = if ctx.cfg.is_none() {
+            return Err("Builder set_before_inst: ctx.cfg is None".to_string());
+        } else {
+            ctx.cfg.as_mut().unwrap()
+        };
+        let bb = cfg.get_mut(self.current_block.unwrap())?;
+        let bb = if bb.is_none() {
+            return Err(format!(
+                "Builder set_before_inst: current_block {:?} points to None",
+                self.current_block
+            ));
+        } else {
+            bb.unwrap()
+        };
+        if inst_id.is_none() {
+            // set to the end of the block
+            self.current_inst = None;
+            return Ok(());
+        }
+        if bb.cur.iter().any(|op_id| *op_id == inst_id.unwrap()) {
+            self.current_inst = inst_id;
+        } else {
+            return Err(format!(
+                "Builder set_before_inst: inst {:?} not in current_block {:?}",
+                inst_id, self.current_block
+            ));
+        }
+        Ok(())
     }
 
-    pub fn add_uses(&mut self, dfg: &mut DFG, op: OpId) -> Result<(), String> {
+    pub fn add_uses(&mut self, ctx: &mut BuilderContext, op: OpId) -> Result<(), String> {
+        let dfg = if ctx.dfg.is_none() {
+            return Err("Builder add_uses: ctx.dfg is None".to_string());
+        } else {
+            ctx.dfg.as_mut().unwrap()
+        };
         let data = dfg.get(op)?;
         let data = if data.is_none() {
-            return Err(("Builder add_uses: op points to None").to_string());
+            return Err("Builder add_uses: op points to None".to_string());
         } else {
             data.unwrap().data.clone()
         };
@@ -73,54 +118,106 @@ impl Builder {
                 }
             }
 
-            OpData::Add { lhs, rhs }
-            | OpData::Sub { lhs, rhs }
-            | OpData::Mul { lhs, rhs }
-            | OpData::Div { lhs, rhs }
-            | OpData::Mod { lhs, rhs }
-            | OpData::Ne { lhs, rhs }
-            | OpData::Eq { lhs, rhs }
-            | OpData::Gt { lhs, rhs }
-            | OpData::Lt { lhs, rhs }
-            | OpData::Ge { lhs, rhs }
-            | OpData::Le { lhs, rhs }
+            OpData::AddI { lhs, rhs }
+            | OpData::SubI { lhs, rhs }
+            | OpData::MulI { lhs, rhs }
+            | OpData::DivI { lhs, rhs }
+            | OpData::ModI { lhs, rhs }
+            | OpData::SNe { lhs, rhs }
+            | OpData::SEq { lhs, rhs }
+            | OpData::SGt { lhs, rhs }
+            | OpData::SLt { lhs, rhs }
+            | OpData::SGe { lhs, rhs }
+            | OpData::SLe { lhs, rhs }
             | OpData::And { lhs, rhs }
             | OpData::Or { lhs, rhs }
             | OpData::Xor { lhs, rhs }
             | OpData::Shl { lhs, rhs }
             | OpData::Shr { lhs, rhs }
-            | OpData::Sar { lhs, rhs } => {
+            | OpData::Sar { lhs, rhs }
+            | OpData::AddF { lhs, rhs }
+            | OpData::SubF { lhs, rhs }
+            | OpData::MulF { lhs, rhs }
+            | OpData::DivF { lhs, rhs }
+            | OpData::ONe { lhs, rhs }
+            | OpData::OEq { lhs, rhs }
+            | OpData::OGt { lhs, rhs }
+            | OpData::OLt { lhs, rhs }
+            | OpData::OGe { lhs, rhs }
+            | OpData::OLe { lhs, rhs } => {
                 dfg.add_use(lhs, op)?;
                 dfg.add_use(rhs, op)?;
             }
 
+            OpData::Sitofp { value } | OpData::Fptosi { value } => {
+                dfg.add_use(value, op)?;
+            }
+
             // GlobalAlloca: Do not maintain uses for global alloca
-            _ => { /* do nothing */}
+            _ => { /* do nothing */ }
         }
         Ok(())
     }
 
     // create an instruction after current instruction
-    pub fn create(
-        &mut self,
-        dfg: &mut DFG,
-        typ: Type,
-        attrs: Vec<Attr>,
-        data: OpData,
-    ) -> Result<OpId, String> {
-        // append_at will update the prev and next pointers accordingly
-        let op_id = dfg.insert_at(self.current_inst, Op::new(typ, attrs, data))?;
-        // update current_inst to the newly created instruction
-        self.current_inst = Some(op_id);
-        Ok(op_id)
+    pub fn create(&mut self, ctx: &mut BuilderContext, op: Op) -> Result<OpId, String> {
+        match op.data {
+            OpData::GlobalAlloca => {
+                let globals = &mut ctx.globals;
+                let op_id = globals.alloc(op)?;
+                Ok(op_id)
+            },
+            _ => {
+                let dfg = if ctx.dfg.is_none() {
+                    return Err("Builder create: ctx.dfg is None".to_string());
+                } else {
+                    ctx.dfg.as_mut().unwrap()
+                };
+                let cfg = if ctx.cfg.is_none() {
+                    return Err("Builder create: ctx.cfg is None".to_string());
+                } else {
+                    ctx.cfg.as_mut().unwrap()
+                };
+
+                // append_at will update the prev and next pointers accordingly
+                let op_id = dfg.alloc(op)?;
+                let bb = cfg.get_mut(self.current_block.unwrap())?;
+                let bb = if bb.is_none() {
+                    return Err(format!(
+                        "Builder create: current_block {:?} points to None",
+                        self.current_block
+                    ));
+                } else {
+                    bb.unwrap()
+                };
+
+                if let Some(current_inst) = self.current_inst {
+                    // insert before current_inst
+                    let pos = bb
+                        .cur
+                        .iter()
+                        .position(|&id| id == current_inst)
+                        .ok_or_else(|| {
+                            format!(
+                                "Builder create: current_inst {:?} not found in current_block {:?}",
+                                current_inst, self.current_block
+                            )
+                        })?;
+                    bb.cur.insert(pos, op_id);
+                } else {
+                    // insert at the end
+                    bb.cur.push(op_id);
+                }
+                // We don't update current_inst, so that the next created instruction is still before the same instruction
+                Ok(op_id)
+            }
+        }
     }
 
-    pub fn create_new_block(&mut self, func: &mut Function) -> Result<BBId, String> {
-        let cfg = &mut func.cfg;
+    pub fn create_new_block(&mut self, ctx: &mut BuilderContext) -> Result<BBId, String> {
+        let cfg = ctx.cfg.as_mut().ok_or("Builder create_new_block: ctx.cfg is None")?;
         let bb_id = cfg.alloc(BasicBlock::new())?;
-        self.current_block = Some(bb_id);
-        // set current_inst to None, which is the head of the new block
-        self.current_inst = None;
+        // we separate block creation and setting current block
         Ok(bb_id)
     }
 }

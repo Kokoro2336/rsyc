@@ -27,19 +27,17 @@ impl<T> ArenaItem<T> {
 }
 
 pub struct IndexedArena<T> {
-    pub head: Option<usize>,
     pub storage: Vec<ArenaItem<T>>,
 }
 
 impl<T> IndexedArena<T> {
     pub fn new() -> Self {
         Self {
-            head: None,
             storage: vec![ArenaItem::None],
         }
     }
 
-    pub fn alloc(&mut self, mut data: T) -> Result<usize, &str> {
+    pub fn alloc(&mut self, data: T) -> Result<usize, &str> {
         let index = self.storage.len();
         self.storage.push(ArenaItem::Data(data));
         Ok(index)

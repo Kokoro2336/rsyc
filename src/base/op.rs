@@ -3,6 +3,7 @@ use std::vec::Vec;
 use crate::asm::config::Reg;
 use crate::base::ir::{BBId, GlobalId};
 use crate::base::Type;
+use crate::frontend::ast::ConstArray;
 use crate::utils::arena::*;
 
 pub type OpId = usize;
@@ -19,31 +20,160 @@ pub enum OpData {
     Int,
     Float,
 
-    // regular instructions
-    Ne { lhs: OpId, rhs: OpId },
-    Eq { lhs: OpId, rhs: OpId },
-    Gt { lhs: OpId, rhs: OpId },
-    Lt { lhs: OpId, rhs: OpId },
-    Ge { lhs: OpId, rhs: OpId },
-    Le { lhs: OpId, rhs: OpId },
-    Add { lhs: OpId, rhs: OpId },
-    Sub { lhs: OpId, rhs: OpId },
-    Mul { lhs: OpId, rhs: OpId },
-    Div { lhs: OpId, rhs: OpId },
-    Mod { lhs: OpId, rhs: OpId },
-    And { lhs: OpId, rhs: OpId },
-    Or { lhs: OpId, rhs: OpId },
-    Xor { lhs: OpId, rhs: OpId }, // bitwise
-    Shl { lhs: OpId, rhs: OpId },
-    Shr { lhs: OpId, rhs: OpId },
-    Sar { lhs: OpId, rhs: OpId }, // bitwise shift
-    Store { addr: OpId, value: OpId },
-    Load { addr: OpId },
+    /* regular instructions */
+    /// Integer
+    AddI {
+        lhs: OpId,
+        rhs: OpId,
+    },
+    SubI {
+        lhs: OpId,
+        rhs: OpId,
+    },
+    MulI {
+        lhs: OpId,
+        rhs: OpId,
+    },
+    DivI {
+        lhs: OpId,
+        rhs: OpId,
+    },
+    ModI {
+        lhs: OpId,
+        rhs: OpId,
+    },
+
+    // The comparisons are logical.
+    And {
+        lhs: OpId,
+        rhs: OpId,
+    },
+    Or {
+        lhs: OpId,
+        rhs: OpId,
+    },
+    Xor {
+        lhs: OpId,
+        rhs: OpId,
+    },
+
+    // Comparison(S: Signed. And SysY only has signed comparison)
+    SNe {
+        lhs: OpId,
+        rhs: OpId,
+    },
+    SEq {
+        lhs: OpId,
+        rhs: OpId,
+    },
+    SGt {
+        lhs: OpId,
+        rhs: OpId,
+    },
+    SLt {
+        lhs: OpId,
+        rhs: OpId,
+    },
+    SGe {
+        lhs: OpId,
+        rhs: OpId,
+    },
+    SLe {
+        lhs: OpId,
+        rhs: OpId,
+    },
+
+    // Bitwise shift
+    Shl {
+        lhs: OpId,
+        rhs: OpId,
+    },
+    Shr {
+        lhs: OpId,
+        rhs: OpId,
+    },
+    Sar {
+        lhs: OpId,
+        rhs: OpId,
+    },
+
+    /// Float
+    AddF {
+        lhs: OpId,
+        rhs: OpId,
+    },
+    SubF {
+        lhs: OpId,
+        rhs: OpId,
+    },
+    MulF {
+        lhs: OpId,
+        rhs: OpId,
+    },
+    DivF {
+        lhs: OpId,
+        rhs: OpId,
+    },
+    // Mod is invalid for float in SysY
+
+    // On the language level, SysY doesn't support And, Or, Xor for float
+
+    // Comparison. SysY doesn't support NaN, so we only have one type of comparison here.
+    ONe {
+        lhs: OpId,
+        rhs: OpId,
+    },
+    OEq {
+        lhs: OpId,
+        rhs: OpId,
+    },
+    OGt {
+        lhs: OpId,
+        rhs: OpId,
+    },
+    OLt {
+        lhs: OpId,
+        rhs: OpId,
+    },
+    OGe {
+        lhs: OpId,
+        rhs: OpId,
+    },
+    OLe {
+        lhs: OpId,
+        rhs: OpId,
+    },
+
+    /// Cast operations
+    Sitofp {
+        value: OpId,
+    }, // int to float
+    Fptosi {
+        value: OpId,
+    }, // float to int
+
+    // SysY doesn't support bitwise shift for float
+    /// Memory operations
+    Store {
+        addr: OpId,
+        value: OpId,
+    },
+    Load {
+        addr: OpId,
+    },
     Alloca,
-    Call { args: Vec<OpId> },
-    Br { cond: OpId },
+
+    /// Control flow
+    Call {
+        args: Vec<OpId>,
+    },
+    Br {
+        cond: OpId,
+    },
     Jump,
-    Ret { value: Option<OpId> },
+    Ret {
+        value: Option<OpId>,
+    },
 }
 
 impl std::fmt::Display for Op {
@@ -77,7 +207,7 @@ impl std::fmt::Display for Op {
                     })
                     .unwrap_or(&0.0)
             ),
-            OpData::GetGlobal(addr) => write!(f, "get_global {}", addr),
+            OpData::GetGlobal(addr) => write!(f, "get_global {}", addr.0),
             OpData::GetArg => write!(
                 f,
                 "get_arg {}",
@@ -107,23 +237,42 @@ impl std::fmt::Display for Op {
                     .unwrap_or(&"".to_string())
             ),
 
-            OpData::Ne { lhs, rhs } => write!(f, "ne {}, {}", lhs, rhs),
-            OpData::Eq { lhs, rhs } => write!(f, "eq {}, {}", lhs, rhs),
-            OpData::Gt { lhs, rhs } => write!(f, "gt {}, {}", lhs, rhs),
-            OpData::Lt { lhs, rhs } => write!(f, "lt {}, {}", lhs, rhs),
-            OpData::Ge { lhs, rhs } => write!(f, "ge {}, {}", lhs, rhs),
-            OpData::Le { lhs, rhs } => write!(f, "le {}, {}", lhs, rhs),
-            OpData::Add { lhs, rhs } => write!(f, "add {}, {}", lhs, rhs),
-            OpData::Sub { lhs, rhs } => write!(f, "sub {}, {}", lhs, rhs),
-            OpData::Mul { lhs, rhs } => write!(f, "mul {}, {}", lhs, rhs),
-            OpData::Div { lhs, rhs } => write!(f, "div {}, {}", lhs, rhs),
-            OpData::Mod { lhs, rhs } => write!(f, "mod {}, {}", lhs, rhs),
+            OpData::AddI { lhs, rhs } => write!(f, "add {}, {}", lhs, rhs),
+            OpData::SubI { lhs, rhs } => write!(f, "sub {}, {}", lhs, rhs),
+            OpData::MulI { lhs, rhs } => write!(f, "mul {}, {}", lhs, rhs),
+            OpData::DivI { lhs, rhs } => write!(f, "div {}, {}", lhs, rhs),
+            OpData::ModI { lhs, rhs } => write!(f, "mod {}, {}", lhs, rhs),
+
             OpData::And { lhs, rhs } => write!(f, "and {}, {}", lhs, rhs),
             OpData::Or { lhs, rhs } => write!(f, "or {}, {}", lhs, rhs),
             OpData::Xor { lhs, rhs } => write!(f, "xor {}, {}", lhs, rhs),
+
+            OpData::SNe { lhs, rhs } => write!(f, "sne {}, {}", lhs, rhs),
+            OpData::SEq { lhs, rhs } => write!(f, "seq {}, {}", lhs, rhs),
+            OpData::SGt { lhs, rhs } => write!(f, "sgt {}, {}", lhs, rhs),
+            OpData::SLt { lhs, rhs } => write!(f, "slt {}, {}", lhs, rhs),
+            OpData::SGe { lhs, rhs } => write!(f, "sge {}, {}", lhs, rhs),
+            OpData::SLe { lhs, rhs } => write!(f, "sle {}, {}", lhs, rhs),
+
             OpData::Shl { lhs, rhs } => write!(f, "shl {}, {}", lhs, rhs),
             OpData::Shr { lhs, rhs } => write!(f, "shr {}, {}", lhs, rhs),
             OpData::Sar { lhs, rhs } => write!(f, "sar {}, {}", lhs, rhs),
+
+            OpData::AddF { lhs, rhs } => write!(f, "addf {}, {}", lhs, rhs),
+            OpData::SubF { lhs, rhs } => write!(f, "subf {}, {}", lhs, rhs),
+            OpData::MulF { lhs, rhs } => write!(f, "mulf {}, {}", lhs, rhs),
+            OpData::DivF { lhs, rhs } => write!(f, "divf {}, {}", lhs, rhs),
+
+            OpData::ONe { lhs, rhs } => write!(f, "one {}, {}", lhs, rhs),
+            OpData::OEq { lhs, rhs } => write!(f, "oeq {}, {}", lhs, rhs),
+            OpData::OGt { lhs, rhs } => write!(f, "ogt {}, {}", lhs, rhs),
+            OpData::OLt { lhs, rhs } => write!(f, "olt {}, {}", lhs, rhs),
+            OpData::OGe { lhs, rhs } => write!(f, "oge {}, {}", lhs, rhs),
+            OpData::OLe { lhs, rhs } => write!(f, "ole {}, {}", lhs, rhs),
+
+            OpData::Sitofp { value } => write!(f, "sitofp {}", value),
+            OpData::Fptosi { value } => write!(f, "fptosi {}", value),
+
             OpData::Store { addr, value } => write!(f, "store {}, {}", addr, value),
             OpData::Load { addr } => write!(f, "load {}", addr),
             OpData::Alloca => write!(
@@ -209,23 +358,19 @@ impl std::fmt::Display for Op {
 }
 
 pub struct Op {
-    pub prev: Option<OpId>,
     pub typ: Type,
     pub attrs: Vec<Attr>,
     pub data: OpData,
     pub uses: Vec<OpId>,
-    pub next: Option<OpId>,
 }
 
 impl Op {
     pub fn new(typ: Type, attrs: Vec<Attr>, data: OpData) -> Self {
         Self {
-            prev: None,
             typ,
             attrs,
             data,
             uses: vec![],
-            next: None,
         }
     }
 }
@@ -252,6 +397,8 @@ pub enum Attr {
     Int(i32),
     // for float
     Float(f32),
+    // for global var
+    GlobalArray(ConstArray),
 }
 
 impl std::fmt::Display for Attr {
@@ -272,6 +419,7 @@ impl std::fmt::Display for Attr {
             Attr::Size(size) => write!(f, "<alloca size: {}>", size),
             Attr::Int(val) => write!(f, "<int: {}>", val),
             Attr::Float(val) => write!(f, "<float: {}>", val),
+            Attr::GlobalArray(array) => write!(f, "<global array: {}>", array.name),
         }
     }
 }
@@ -279,28 +427,6 @@ impl std::fmt::Display for Attr {
 // impl dfg
 impl Arena<Op> for IndexedArena<Op> {
     fn remove(&mut self, idx: OpId) -> Result<OpId, String> {
-        let node = self.get(idx)?;
-        let (prev, next) = if let Some(node) = node {
-            (node.prev, node.next)
-        } else {
-            return Err("IndexedArena remove: index not found".to_string());
-        };
-
-        // update the surrounding nodes
-        if let Some(prev) = prev {
-            if let Some(prev_node) = self.get_mut(prev)? {
-                prev_node.next = next;
-            }
-        } else {
-            self.head = next;
-        }
-
-        if let Some(next) = next {
-            if let Some(next_node) = self.get_mut(next)? {
-                next_node.prev = prev;
-            }
-        }
-
         // mark this slot as deleted
         self.storage[idx] = ArenaItem::None;
         Ok(idx)
@@ -308,24 +434,14 @@ impl Arena<Op> for IndexedArena<Op> {
 
     fn gc(&mut self) -> Result<Vec<ArenaItem<Op>>, String> {
         let mut new_arena: Vec<ArenaItem<Op>> = vec![];
-        let mut at = self.head;
-        if at.is_none() {
-            return Ok(vec![]);
-        }
 
         // Transport
-        // DFG is actually a linked list, we can reorder the nodes' layout by the way of transporting.
-        while let Some(idx) = at {
+        for item in self.storage.iter_mut() {
             // check if the slot is occupied by data
-            if matches!(self.storage.get(idx), Some(ArenaItem::Data(_))) {
+            if matches!(item, ArenaItem::Data(_)) {
                 let new_idx = new_arena.len();
-                let data = self.storage[idx].replace(new_idx);
-                let next = match data {
-                    ArenaItem::Data(ref node) => node.next,
-                    _ => None,
-                };
+                let data = item.replace(new_idx);
                 new_arena.push(data);
-                at = next;
             }
         }
 
@@ -333,21 +449,13 @@ impl Arena<Op> for IndexedArena<Op> {
         for item in new_arena.iter_mut() {
             // item can't be any other variant than Data here
             if let ArenaItem::Data(node) = item {
-                node.prev = match node.prev {
-                    Some(old_idx) => match self.storage[old_idx] {
-                        ArenaItem::NewIndex(new_idx) => Some(new_idx),
-                        _ => None,
-                    },
-                    None => None,
-                };
-                // TODO: rewrite uses.
-                node.next = match node.next {
-                    Some(old_idx) => match self.storage[old_idx] {
-                        ArenaItem::NewIndex(new_idx) => Some(new_idx),
-                        _ => None,
-                    },
-                    None => None,
-                };
+                for use_idx in node.uses.iter_mut() {
+                    *use_idx = match self.storage[*use_idx] {
+                        ArenaItem::NewIndex(new_idx) => new_idx,
+                        _ => *use_idx,
+                    };
+                }
+                // TODO: rewrite operands in OpData, and this requires the old CFG to be passed in
             }
         }
 
@@ -357,62 +465,6 @@ impl Arena<Op> for IndexedArena<Op> {
 }
 
 impl IndexedArena<Op> {
-    // insert at the front of idx. If idx is None, insert at the end.
-    pub fn insert_at(&mut self, idx: Option<OpId>, mut data: Op) -> Result<OpId, String> {
-        if let Some(id) = idx {
-            let mut prev_idx = None;
-            if let Some(node) = self.get(id)? {
-                prev_idx = node.prev;
-            }
-            // update data's links
-            data.prev = prev_idx;
-            data.next = Some(id);
-
-            let index = self.alloc(data)?;
-
-            // update the surrounding nodes
-            if let Some(prev) = prev_idx {
-                if let Some(node) = self.get_mut(prev)? {
-                    node.next = Some(index);
-                }
-            } else {
-                self.head = Some(index);
-            }
-
-            if let Some(node) = self.get_mut(id)? {
-                node.prev = Some(index);
-            }
-
-            Ok(index)
-        } else {
-            let mut tail_idx = None;
-            let mut curr = self.head;
-            while let Some(c) = curr {
-                tail_idx = Some(c);
-                if let Some(node) = self.get(c)? {
-                    curr = node.next;
-                } else {
-                    break;
-                }
-            }
-
-            data.prev = tail_idx;
-            data.next = None;
-
-            let index = self.alloc(data)?;
-
-            if let Some(tail) = tail_idx {
-                if let Some(node) = self.get_mut(tail)? {
-                    node.next = Some(index);
-                }
-            } else {
-                self.head = Some(index);
-            }
-
-            Ok(index)
-        }
-    }
-
     pub fn add_use(&mut self, op_idx: OpId, use_idx: OpId) -> Result<(), String> {
         if let Some(node) = self.get_mut(op_idx)? {
             node.uses.push(use_idx);

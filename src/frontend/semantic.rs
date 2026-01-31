@@ -117,7 +117,9 @@ impl Semantic {
             match *lit {
                 Literal::Int(_) => Ok(Type::Int),
                 Literal::Float(_) => Ok(Type::Float),
-                Literal::String(_) => Ok(Type::String),
+                Literal::String(_) => Ok(Type::Pointer {
+                    base: Box::new(Type::Char),
+                }),
             }
         } else if is::<VarAccess>(node) {
             let var_access = cast_mut::<VarAccess>(node).unwrap();
@@ -524,7 +526,9 @@ impl Pass<Box<dyn Node>> for Semantic {
             Type::Function {
                 return_type: Box::new(Type::Void),
                 param_types: vec![
-                    Type::String 
+                    Type::Pointer {
+                        base: Box::new(Type::Char),
+                    },
                     /*only store the string type, since the trailing params are dynamic according to the format string*/ 
                 ],
             },
@@ -574,7 +578,7 @@ fn raise(typ: Type) -> Type {
 }
 
 // Array -> Pointer
-fn decay(typ: Type) -> Type {
+pub fn decay(typ: Type) -> Type {
     match typ {
         Type::Array { base, dims } => {
             if dims.len() == 0 {

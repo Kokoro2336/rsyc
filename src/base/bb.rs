@@ -2,8 +2,11 @@ use crate::base::ir::{OpId, DFG};
 use crate::utils::arena::*;
 
 pub type BBId = usize;
-pub type GlobalId = usize;
 pub type CFG = IndexedArena<BasicBlock>;
+
+// We need strictly separate GlobalId from OpId to avoid confusion.
+#[derive(Clone, Copy, Debug)]
+pub struct GlobalId(pub usize);
 
 pub struct Program {
     // global vars
@@ -14,7 +17,10 @@ pub struct Program {
 
 impl Program {
     pub fn new() -> Self {
-        Self { globals: DFG::new(), funcs: vec![] }
+        Self {
+            globals: DFG::new(),
+            funcs: vec![],
+        }
     }
 }
 
@@ -25,13 +31,15 @@ impl Default for Program {
 }
 
 pub struct Function {
+    pub name: String,
     pub cfg: CFG,
     pub dfg: DFG,
 }
 
 impl Function {
-    pub fn new() -> Self {
+    pub fn new(name: String) -> Self {
         Self {
+            name,
             cfg: IndexedArena::new(),
             dfg: DFG::new(),
         }
@@ -64,9 +72,6 @@ impl Arena<BasicBlock> for IndexedArena<BasicBlock> {
     fn gc(&mut self) -> Result<Vec<ArenaItem<BasicBlock>>, String> {
         let new_arena: Vec<ArenaItem<BasicBlock>> = vec![];
         let old_arena = std::mem::replace(&mut self.storage, new_arena);
-        if self.head.is_none() {
-            return Err("CFG gc: head is none".to_string());
-        }
 
         // Transport
         // CFG is a complex graph, reorder the layout seems impossible, so we just iterate the original storage directly.

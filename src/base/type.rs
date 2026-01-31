@@ -18,7 +18,7 @@ pub enum Type {
         param_types: Vec<Type>,
     },
     // only occurs in SysY lib function
-    String,
+    Char, /*u8*/
 }
 
 impl std::fmt::Display for Type {
@@ -50,8 +50,8 @@ impl std::fmt::Display for Type {
                 }
                 write!(f, ") -> {}", return_type)
             }
-            Type::String => {
-                write!(f, "string")
+            Type::Char => {
+                write!(f, "char")
             }
         }
     }
@@ -66,7 +66,7 @@ impl Type {
             Type::Array { base, dims } => base.size_in_bytes() * dims.iter().product::<u32>(),
             Type::Pointer { .. } => RISCV_BITS / 8,
             Type::Function { .. } => panic!("Function type has no size"),
-            Type::String => panic!("String type has no size"),
+            Type::Char => 1,
         }
     }
 }
