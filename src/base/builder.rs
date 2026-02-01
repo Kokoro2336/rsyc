@@ -153,8 +153,21 @@ impl Builder {
                 dfg.add_use(value, op)?;
             }
 
+            OpData::GEP { base, indices } => {
+                dfg.add_use(base, op)?;
+                for index in indices {
+                    dfg.add_use(index, op)?;
+                }
+            }
+
             // GlobalAlloca: Do not maintain uses for global alloca
-            _ => { /* do nothing */ }
+            OpData::GlobalAlloca
+            | OpData::GetArg
+            | OpData::Int
+            | OpData::Float
+            // ?
+            | OpData::Alloca
+            | OpData::Jump => { /* do nothing */ }
         }
         Ok(())
     }
@@ -166,7 +179,7 @@ impl Builder {
                 let globals = &mut ctx.globals;
                 let op_id = globals.alloc(op)?;
                 Ok(op_id)
-            },
+            }
             _ => {
                 let dfg = if ctx.dfg.is_none() {
                     return Err("Builder create: ctx.dfg is None".to_string());
@@ -215,7 +228,10 @@ impl Builder {
     }
 
     pub fn create_new_block(&mut self, ctx: &mut BuilderContext) -> Result<BBId, String> {
-        let cfg = ctx.cfg.as_mut().ok_or("Builder create_new_block: ctx.cfg is None")?;
+        let cfg = ctx
+            .cfg
+            .as_mut()
+            .ok_or("Builder create_new_block: ctx.cfg is None")?;
         let bb_id = cfg.alloc(BasicBlock::new())?;
         // we separate block creation and setting current block
         Ok(bb_id)

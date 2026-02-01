@@ -33,23 +33,32 @@ impl Semantic {
             let lhs_type = self.analyze(&mut bin_op.lhs)?;
             let rhs_type = self.analyze(&mut bin_op.rhs)?;
 
-            // And & Or
-            if matches!(lhs_type, Type::Float) {
-                bin_op.lhs = Box::new(BinaryOp {
-                    typ: Type::Int,
-                    lhs: take(&mut bin_op.lhs),
-                    op: Op::Ne,
-                    rhs: Box::new(Literal::Float(0.0)),
-                });
+            // Modulo
+            if bin_op.op == Op::Mod {
+                if !matches!(lhs_type, Type::Int) || !matches!(rhs_type, Type::Int) {
+                    return Err("Modulo operator % only supports Int type".to_string());
+                }
             }
 
-            if matches!(rhs_type, Type::Float) {
-                bin_op.rhs = Box::new(BinaryOp {
-                    typ: Type::Int,
-                    lhs: take(&mut bin_op.rhs),
-                    op: Op::Ne,
-                    rhs: Box::new(Literal::Float(0.0)),
-                });
+            // And & Or
+            if matches!(bin_op.op, Op::And | Op::Or) {
+                if matches!(lhs_type, Type::Float) {
+                    bin_op.lhs = Box::new(BinaryOp {
+                        typ: Type::Int,
+                        lhs: take(&mut bin_op.lhs),
+                        op: Op::Ne,
+                        rhs: Box::new(Literal::Float(0.0)),
+                    });
+                }
+
+                if matches!(rhs_type, Type::Float) {
+                    bin_op.rhs = Box::new(BinaryOp {
+                        typ: Type::Int,
+                        lhs: take(&mut bin_op.rhs),
+                        op: Op::Ne,
+                        rhs: Box::new(Literal::Float(0.0)),
+                    });
+                }
             }
 
             // Implicit cast
@@ -127,7 +136,7 @@ impl Semantic {
                 var_access.typ = var_type.clone();
                 Ok(var_type.clone())
             } else {
-                panic!("Undefined variable: {}", var_access.name);
+                return Err(format!("Undefined variable: {}", var_access.name));
             }
         } else if is::<Call>(node) {
             let call = cast_mut::<Call>(node).unwrap();
@@ -137,10 +146,10 @@ impl Semantic {
                         return_type,
                         param_types,
                     } => (param_types.clone(), *return_type.clone()),
-                    _ => panic!("{} is not a function", call.func_name),
+                    _ => return Err(format!("{} is not a function", call.func_name)),
                 }
             } else {
-                panic!("Undefined FnDecl: {}", call.func_name);
+                return Err(format!("Undefined FnDecl: {}", call.func_name));
             };
 
             // check argument types
@@ -219,9 +228,9 @@ impl Semantic {
             Ok(return_typ)
         } else if is::<ArrayAccess>(node) {
             let array_access = cast_mut::<ArrayAccess>(node).unwrap();
-            let array_type = self.syms.get(&array_access.name).unwrap_or_else(|| {
-                panic!("Undefined array variable: {}", array_access.name);
-            });
+            let array_type = self.syms.get(&array_access.name).ok_or_else(|| {
+                format!("Undefined array variable: {}", array_access.name)
+            })?;
 
             // infer the access's typ
             array_access.typ = if let Type::Array { base, dims } = array_type {
@@ -233,7 +242,7 @@ impl Semantic {
                     decay(Type::Array {
                         base: base.clone(),
                         dims: new_dims,
-                    })
+                    })?
                 }
             } else {
                 return Err(format!(
@@ -553,48 +562,26 @@ impl Pass<Box<dyn Node>> for Semantic {
     }
 }
 
-// Pointer -> Array
-fn raise(typ: Type) -> Type {
-    match typ {
-        Type::Pointer { base } => match *base {
-            Type::Array {
-                base: arr_base,
-                dims,
-            } => Type::Array {
-                base: arr_base,
-                dims: {
-                    let mut vec = vec![1];
-                    vec.extend(dims);
-                    vec
-                },
-            },
-            _ => Type::Array {
-                base,
-                dims: vec![1],
-            },
-        },
-        _ => panic!("Cannot raise non-pointer type: {:?}", typ),
-    }
-}
-
 // Array -> Pointer
-pub fn decay(typ: Type) -> Type {
+pub fn decay(typ: Type) -> Result<Type, String> {
     match typ {
         Type::Array { base, dims } => {
             if dims.len() == 0 {
-                panic!("Cannot decay array with zero dimensions!");
+                return Err("Cannot decay array with zero dimensions!".to_string());
             }
             if dims.len() == 1 {
-                Type::Pointer { base }
+                Ok(Type::Pointer { base })
             } else {
-                Type::Pointer {
+                Ok(Type::Pointer {
                     base: Box::new(Type::Array {
                         base,
                         dims: dims[1..].to_vec(),
                     }),
-                }
+                })
             }
-        }
-        _ => panic!("Cannot decay non-array type: {:?}", typ),
+        },
+        // do nothing for pointer type
+        Type::Pointer {..} => Ok(typ),
+        _ => Err(format!("Cannot decay non-array type: {:?}", typ)),
     }
 }

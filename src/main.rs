@@ -9,11 +9,11 @@ mod debug;
 mod frontend;
 mod opt;
 mod utils;
-use crate::base::Pass;
+use crate::base::{Builder, Pass};
 use crate::debug::setup;
 use crate::frontend::ast::Node;
 use crate::frontend::parse;
-use crate::frontend::semantic::Semantic;
+use crate::frontend::*;
 
 use debug::graph::dump_graph;
 use debug::info;
@@ -101,6 +101,18 @@ fn main() -> Result<()> {
         info!("Dumping AST graph.");
         dump_graph(true, &*result, "ast");
     }
+
+    info!("Start Emitting.");
+    let ir = {
+        let mut emitter = Emit::new(Builder::new(), &result);
+        match emitter.run() {
+            Ok(res) => res,
+            Err(e) => {
+                panic!("Emit Error: {}", e);
+            }
+        }
+    };
+    info!("Finish Emitting.");
 
     Ok(())
 }

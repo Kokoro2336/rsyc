@@ -3,7 +3,7 @@ use std::vec::Vec;
 use crate::asm::config::Reg;
 use crate::base::ir::{BBId, GlobalId};
 use crate::base::Type;
-use crate::frontend::ast::ConstArray;
+use crate::frontend::ast::Literal;
 use crate::utils::arena::*;
 
 pub type OpId = usize;
@@ -13,9 +13,13 @@ pub type DFG = IndexedArena<Op>;
 #[derive(Debug, Clone)]
 pub enum OpData {
     // customized instructions for convenience
-    GetGlobal(GlobalId),
     GlobalAlloca,
     GetArg,
+    // getelementptr
+    GEP {
+        base: OpId,
+        indices: Vec<OpId>,
+    },
     // for immediate values
     Int,
     Float,
@@ -207,7 +211,6 @@ impl std::fmt::Display for Op {
                     })
                     .unwrap_or(&0.0)
             ),
-            OpData::GetGlobal(addr) => write!(f, "get_global {}", addr.0),
             OpData::GetArg => write!(
                 f,
                 "get_arg {}",
@@ -222,6 +225,16 @@ impl std::fmt::Display for Op {
                     })
                     .unwrap_or(&0)
             ),
+            OpData::GEP { base, indices } => {
+                write!(f, "gep {}, [", base)?;
+                for (i, index) in indices.iter().enumerate() {
+                    write!(f, "{}", index)?;
+                    if i != indices.len() - 1 {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, "]")
+            }
             OpData::GlobalAlloca => write!(
                 f,
                 "global_alloc {}",
@@ -398,7 +411,13 @@ pub enum Attr {
     // for float
     Float(f32),
     // for global var
-    GlobalArray(ConstArray),
+    GlobalArray {
+        // if mutable -> .data; else .rodata
+        name: String,
+        mutable: bool,
+        typ: Type,
+        values: Vec<Literal>,
+    },
 }
 
 impl std::fmt::Display for Attr {
@@ -419,7 +438,12 @@ impl std::fmt::Display for Attr {
             Attr::Size(size) => write!(f, "<alloca size: {}>", size),
             Attr::Int(val) => write!(f, "<int: {}>", val),
             Attr::Float(val) => write!(f, "<float: {}>", val),
-            Attr::GlobalArray(array) => write!(f, "<global array: {}>", array.name),
+            Attr::GlobalArray {
+                name,
+                mutable: _,
+                typ: _,
+                values: _,
+            } => write!(f, "<global array: {}>", name),
         }
     }
 }
@@ -455,7 +479,113 @@ impl Arena<Op> for IndexedArena<Op> {
                         _ => *use_idx,
                     };
                 }
-                // TODO: rewrite operands in OpData, and this requires the old CFG to be passed in
+
+                // rewrite operands
+                match &mut node.data {
+                    OpData::AddI { lhs, rhs }
+                    | OpData::SubI { lhs, rhs }
+                    | OpData::MulI { lhs, rhs }
+                    | OpData::DivI { lhs, rhs }
+                    | OpData::ModI { lhs, rhs }
+                    | OpData::SNe { lhs, rhs }
+                    | OpData::SEq { lhs, rhs }
+                    | OpData::SGt { lhs, rhs }
+                    | OpData::SLt { lhs, rhs }
+                    | OpData::SGe { lhs, rhs }
+                    | OpData::SLe { lhs, rhs }
+                    | OpData::And { lhs, rhs }
+                    | OpData::Or { lhs, rhs }
+                    | OpData::Xor { lhs, rhs }
+                    | OpData::Shl { lhs, rhs }
+                    | OpData::Shr { lhs, rhs }
+                    | OpData::Sar { lhs, rhs }
+                    | OpData::AddF { lhs, rhs }
+                    | OpData::SubF { lhs, rhs }
+                    | OpData::MulF { lhs, rhs }
+                    | OpData::DivF { lhs, rhs }
+                    | OpData::ONe { lhs, rhs }
+                    | OpData::OEq { lhs, rhs }
+                    | OpData::OGt { lhs, rhs }
+                    | OpData::OLt { lhs, rhs }
+                    | OpData::OGe { lhs, rhs }
+                    | OpData::OLe { lhs, rhs } => {
+                        *lhs = match self.storage[*lhs] {
+                            ArenaItem::NewIndex(new_idx) => new_idx,
+                            _ => *lhs,
+                        };
+                        *rhs = match self.storage[*rhs] {
+                            ArenaItem::NewIndex(new_idx) => new_idx,
+                            _ => *rhs,
+                        };
+                    }
+
+                    OpData::Sitofp { value } | OpData::Fptosi { value } => {
+                        *value = match self.storage[*value] {
+                            ArenaItem::NewIndex(new_idx) => new_idx,
+                            _ => *value,
+                        };
+                    }
+                    OpData::Store { addr, value } => {
+                        *addr = match self.storage[*addr] {
+                            ArenaItem::NewIndex(new_idx) => new_idx,
+                            _ => *addr,
+                        };
+                        *value = match self.storage[*value] {
+                            ArenaItem::NewIndex(new_idx) => new_idx,
+                            _ => *value,
+                        };
+                    }
+                    OpData::Load { addr } => {
+                        *addr = match self.storage[*addr] {
+                            ArenaItem::NewIndex(new_idx) => new_idx,
+                            _ => *addr,
+                        };
+                    }
+                    OpData::Call { args } => {
+                        for arg in args.iter_mut() {
+                            *arg = match self.storage[*arg] {
+                                ArenaItem::NewIndex(new_idx) => new_idx,
+                                _ => *arg,
+                            };
+                        }
+                    }
+                    OpData::Br { cond } => {
+                        *cond = match self.storage[*cond] {
+                            ArenaItem::NewIndex(new_idx) => new_idx,
+                            _ => *cond,
+                        };
+                    }
+                    OpData::Ret { value } => {
+                        if let Some(val) = value {
+                            *val = match self.storage[*val] {
+                                ArenaItem::NewIndex(new_idx) => new_idx,
+                                _ => *val,
+                            };
+                        }
+                    }
+
+                    OpData::GEP { base, indices } => {
+                        *base = match self.storage[*base] {
+                            ArenaItem::NewIndex(new_idx) => new_idx,
+                            _ => *base,
+                        };
+                        for index in indices.iter_mut() {
+                            *index = match self.storage[*index] {
+                                ArenaItem::NewIndex(new_idx) => new_idx,
+                                _ => *index,
+                            };
+                        }
+                    }
+
+                    // Get global should be processed outside of gc()
+                    // TODO: As long as program global arena is not changed, the indices are stable.
+                    OpData::GlobalAlloca
+                    | OpData::GetArg
+                    | OpData::Int
+                    | OpData::Float
+                    | OpData::Alloca
+                    | OpData::Jump => { /* no operands to rewrite */ }
+                }
             }
         }
 

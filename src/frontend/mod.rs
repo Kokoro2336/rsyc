@@ -1,5 +1,8 @@
 pub mod ast;
-pub mod parse;
-pub mod semantic;
 pub mod dump;
-pub mod emit;
+pub mod parse;
+
+mod semantic;
+mod emit;
+pub use semantic::Semantic;
+pub use emit::Emit;
