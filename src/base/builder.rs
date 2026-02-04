@@ -50,10 +50,6 @@ impl Builder {
         self.loop_stack.last_mut()
     }
 
-    pub fn guard(&mut self) -> BuilderGuard {
-        BuilderGuard::new(self)
-    }
-
     pub fn set_current_block(&mut self, block_id: Operand) -> Result<(), String> {
         // Emm... just set current_block, no check.
         self.current_block = Some(block_id);
