@@ -1,6 +1,6 @@
 use crate::base::ir;
 use crate::base::ir::*;
-use crate::base::{Builder, BuilderContext, LoopInfo};
+use crate::base::{BranchInfo, Builder, BuilderContext, LoopInfo};
 /**
  * Original IR generation.
  */
@@ -18,9 +18,9 @@ pub struct Emit<'a> {
     program: Program,
 
     // This time, for the convenience of recongizing global vars, we store a separate table for them.
-    globals: HashMap<String, GlobalId>,
+    globals: HashMap<String, Operand>,
     // symbol -> OpId(for Alloca)
-    syms: SymbolTable<String, OpId>,
+    syms: SymbolTable<String, Operand>,
     // we store the idx of current function
     current_function: Option<usize>,
     // original name -> promoted name
@@ -47,12 +47,19 @@ impl<'a> Emit<'a> {
         }
     }
 
-    pub fn emit(&mut self, node: &Box<dyn Node>) -> Result<Option<OpId>, String> {
+    pub fn emit(&mut self, node: &Box<dyn Node>) -> Result<Option<Operand>, String> {
         if let Some(fn_decl) = cast::<FnDecl>(node) {
             // create new function
-            self.program.funcs.push(Function::new(fn_decl.name.clone()));
-            self.current_function = Some(self.program.funcs.len() - 1);
-            let func = &mut self.program.funcs[self.current_function.unwrap()];
+            self.current_function = Some(
+                self.program
+                    .funcs
+                    .add(Function::new(fn_decl.name.clone()))?,
+            );
+            let func = &mut self
+                .program
+                .funcs
+                .get_mut(self.current_function.unwrap())?
+                .unwrap();
 
             // get and store arguments
             // shadow the ctx to use function's cfg/dfg
@@ -64,7 +71,7 @@ impl<'a> Emit<'a> {
             };
             //create new block for function
             let block_id = self.builder.create_new_block(ctx)?;
-            self.builder.set_current_block(block_id);
+            self.builder.set_current_block(block_id)?;
             // enter function scope
             self.syms.enter_scope();
 
@@ -73,8 +80,8 @@ impl<'a> Emit<'a> {
                     ctx,
                     ir::Op::new(
                         arg.1.clone(),
-                        vec![Attr::Function(arg.0.clone()), Attr::Param(i as u32)],
-                        OpData::GetArg,
+                        vec![],
+                        OpData::GetArg(Operand::ParamId(i as u32)),
                     ),
                 )?;
                 let alloca = self.builder.create(
@@ -83,8 +90,8 @@ impl<'a> Emit<'a> {
                         Type::Pointer {
                             base: Box::new(arg.1.clone()),
                         },
-                        vec![Attr::Param(i as u32)],
-                        OpData::Alloca,
+                        vec![],
+                        OpData::Alloca(arg.1.size_in_bytes()),
                     ),
                 )?;
                 self.builder.create(
@@ -99,6 +106,22 @@ impl<'a> Emit<'a> {
                     ),
                 )?;
             }
+
+            // create new block for body
+            let body_block_id = self.builder.create_new_block(ctx)?;
+            // jump to body block
+            self.builder.create(
+                ctx,
+                ir::Op::new(
+                    Type::Void,
+                    vec![],
+                    OpData::Jump {
+                        target_bb: body_block_id.clone(),
+                    },
+                ),
+            )?;
+            // set current block to body block
+            self.builder.set_current_block(body_block_id)?;
 
             // parse the function body
             self.emit(&fn_decl.body)?;
@@ -122,7 +145,7 @@ impl<'a> Emit<'a> {
             };
             // create new block
             let block_id = self.builder.create_new_block(ctx)?;
-            self.builder.set_current_block(block_id);
+            self.builder.set_current_block(block_id)?;
 
             // enter scope
             self.syms.enter_scope();
@@ -161,7 +184,6 @@ impl<'a> Emit<'a> {
                             base: Box::new(var_decl.typ.clone()),
                         },
                         vec![
-                            Attr::Size(var_decl.typ.size_in_bytes()),
                             // treat all the global vars as Array.
                             Attr::GlobalArray {
                                 name: var_decl.name.clone(),
@@ -182,11 +204,11 @@ impl<'a> Emit<'a> {
                                 },
                             },
                         ],
-                        OpData::GlobalAlloca,
+                        OpData::GlobalAlloca(var_decl.typ.size_in_bytes()),
                     ),
                 )?;
                 // insert into globals table. If the var is global, then the symbol table must be at global scope.
-                self.globals.insert(var_decl.name.clone(), GlobalId(alloca));
+                self.globals.insert(var_decl.name.clone(), alloca);
             } else {
                 // Alloca
                 let alloca = self.builder.create(
@@ -196,12 +218,12 @@ impl<'a> Emit<'a> {
                         Type::Pointer {
                             base: Box::new(var_decl.typ.clone()),
                         },
-                        vec![Attr::Size(var_decl.typ.size_in_bytes())],
-                        OpData::Alloca,
+                        vec![],
+                        OpData::Alloca(var_decl.typ.size_in_bytes()),
                     ),
                 )?;
                 // insert into symbol table
-                self.syms.insert(var_decl.name.clone(), alloca);
+                self.syms.insert(var_decl.name.clone(), alloca.clone());
                 // if has init value, create store
                 if let Some(init_val) = &var_decl.init_value {
                     let op_id = self.emit(init_val)?;
@@ -259,32 +281,33 @@ impl<'a> Emit<'a> {
                         Type::Pointer {
                             base: Box::new(var_array.typ.clone()),
                         },
-                        vec![
-                            Attr::Size(var_array.typ.size_in_bytes()),
-                            Attr::GlobalArray {
-                                name: var_array.name.clone(),
-                                mutable: true,
-                                typ: var_array.typ.clone(),
-                                values: if let Some(init_values) = &var_array.init_values {
-                                    init_values.iter().map(|v| {
+                        vec![Attr::GlobalArray {
+                            name: var_array.name.clone(),
+                            mutable: true,
+                            typ: var_array.typ.clone(),
+                            values: if let Some(init_values) = &var_array.init_values {
+                                init_values
+                                    .iter()
+                                    .map(|v| {
                                         if let Some(lit) = cast::<Literal>(v) {
                                             lit.clone()
                                         } else {
-                                            panic!("Global VarArray init_values contain non-Literal");
+                                            panic!(
+                                                "Global VarArray init_values contain non-Literal"
+                                            );
                                         }
-                                    }).collect()
-                                } else {
-                                    // panic
-                                    return Err("Global VarArray has no init_values".to_string());
-                                },
+                                    })
+                                    .collect()
+                            } else {
+                                // panic
+                                return Err("Global VarArray has no init_values".to_string());
                             },
-                        ],
-                        OpData::GlobalAlloca,
+                        }],
+                        OpData::GlobalAlloca(var_array.typ.size_in_bytes()),
                     ),
                 )?;
                 // insert into globals table. If the var is global, then the symbol table must because at global scope.
-                self.globals
-                    .insert(var_array.name.clone(), GlobalId(alloca));
+                self.globals.insert(var_array.name.clone(), alloca);
             } else {
                 let total_size = var_array.typ.size_in_bytes();
                 let alloca = self.builder.create(
@@ -293,12 +316,12 @@ impl<'a> Emit<'a> {
                         Type::Pointer {
                             base: Box::new(var_array.typ.clone()),
                         },
-                        vec![Attr::Size(total_size)],
-                        OpData::Alloca,
+                        vec![],
+                        OpData::Alloca(total_size),
                     ),
                 )?;
                 // insert the pointer of the array into symbol table
-                self.syms.insert(var_array.name.clone(), alloca);
+                self.syms.insert(var_array.name.clone(), alloca.clone());
                 // if has init values, create stores
                 if let Some(init_values) = &var_array.init_values {
                     let (dims, base) = match &var_array.typ {
@@ -337,10 +360,9 @@ impl<'a> Emit<'a> {
                                 },
                                 vec![],
                                 OpData::GEP {
-                                    base: alloca,
-                                    indices: range
-                                        .clone()
-                                        .splice(0..0, std::iter::once(0))
+                                    base: alloca.clone(),
+                                    indices: std::iter::once(Operand::Index(0))
+                                        .chain(range.iter().map(|&i| Operand::Index(i)))
                                         .collect(),
                                 },
                             ),
@@ -408,30 +430,27 @@ impl<'a> Emit<'a> {
                     Type::Pointer {
                         base: Box::new(const_array.typ.clone()),
                     },
-                    vec![
-                        Attr::Size(const_array.typ.size_in_bytes()),
-                        Attr::GlobalArray {
-                            name: name.clone(),
-                            mutable: false,
-                            typ: const_array.typ.clone(),
-                            values: const_array
-                                .init_values
-                                .iter()
-                                .map(|v| {
-                                    if let Some(lit) = cast::<Literal>(v) {
-                                        lit.clone()
-                                    } else {
-                                        panic!("ConstArray init_values contain non-Literal");
-                                    }
-                                })
-                                .collect(),
-                        },
-                    ],
-                    OpData::GlobalAlloca,
+                    vec![Attr::GlobalArray {
+                        name: name.clone(),
+                        mutable: false,
+                        typ: const_array.typ.clone(),
+                        values: const_array
+                            .init_values
+                            .iter()
+                            .map(|v| {
+                                if let Some(lit) = cast::<Literal>(v) {
+                                    lit.clone()
+                                } else {
+                                    panic!("ConstArray init_values contain non-Literal");
+                                }
+                            })
+                            .collect(),
+                    }],
+                    OpData::GlobalAlloca(const_array.typ.size_in_bytes()),
                 ),
             )?;
             // insert into globals table. If the var is global, then the symbol table must because at global scope.
-            self.globals.insert(name, GlobalId(alloca));
+            self.globals.insert(name, alloca);
         } else if let Some(ret) = cast::<Return>(node) {
             if let Some(ret_val) = &ret.0 {
                 let op_id = self.emit(ret_val)?;
@@ -474,8 +493,40 @@ impl<'a> Emit<'a> {
                 )?;
             }
         } else if let Some(if_stmt) = cast::<If>(node) {
+            let (then_block, else_block, end_block) = {
+                let ctx = if let Some(func_idx) = self.current_function {
+                    let func = &mut self.program.funcs[func_idx];
+                    &mut BuilderContext {
+                        cfg: Some(&mut func.cfg),
+                        dfg: Some(&mut func.dfg),
+                        globals: &mut self.program.globals,
+                    }
+                } else {
+                    panic!("If statement outside function");
+                };
+
+                // create blocks first
+                (
+                    self.builder.create_new_block(ctx)?,
+                    if if_stmt.else_block.is_some() {
+                        Some(self.builder.create_new_block(ctx)?)
+                    } else {
+                        None
+                    },
+                    self.builder.create_new_block(ctx)?,
+                )
+            };
+
+            // set BranchInfo
+            self.builder.push_branch(BranchInfo {
+                then_block: Some(then_block.clone()),
+                else_block: else_block.clone(),
+                end_block: Some(end_block.clone()),
+            });
             // evaluate the codition
             let cond_op = self.emit(&if_stmt.condition)?;
+            self.builder.pop_branch();
+
             let ctx = if let Some(func_idx) = self.current_function {
                 let func = &mut self.program.funcs[func_idx];
                 &mut BuilderContext {
@@ -487,33 +538,22 @@ impl<'a> Emit<'a> {
                 panic!("If statement outside function");
             };
 
-            // create blocks
-            let then_block = self.builder.create_new_block(ctx)?;
-            let else_block = if if_stmt.else_block.is_some() {
-                Some(self.builder.create_new_block(ctx)?)
-            } else {
-                None
-            };
-            let end_block = self.builder.create_new_block(ctx)?;
-
             // create branch instructions
-            let attrs = vec![Attr::Branch {
-                then_bb: then_block,
-                else_bb: else_block,
-            }];
             self.builder.create(
                 ctx,
                 ir::Op::new(
                     Type::Void,
-                    attrs,
+                    vec![],
                     OpData::Br {
                         cond: cond_op.unwrap(),
+                        then_bb: then_block.clone(),
+                        else_bb: else_block.clone(),
                     },
                 ),
             )?;
 
             // then block_id
-            self.builder.set_current_block(then_block);
+            self.builder.set_current_block(then_block)?;
             self.emit(&if_stmt.then_block)?;
 
             // Re-acquire ctx
@@ -531,13 +571,19 @@ impl<'a> Emit<'a> {
             // Add jump to end_block if not terminated
             self.builder.create(
                 ctx,
-                ir::Op::new(Type::Void, vec![Attr::Jump(end_block)], OpData::Jump),
+                ir::Op::new(
+                    Type::Void,
+                    vec![],
+                    OpData::Jump {
+                        target_bb: end_block.clone(),
+                    },
+                ),
             )?;
 
             // else block_id
             if let Some(else_blk) = else_block {
-                self.builder.set_current_block(else_blk);
-                self.emit(&if_stmt.else_block.as_ref().unwrap())?;
+                self.builder.set_current_block(else_blk)?;
+                self.emit(if_stmt.else_block.as_ref().unwrap())?;
 
                 // Re-acquire ctx
                 let ctx = if let Some(func_idx) = self.current_function {
@@ -554,12 +600,18 @@ impl<'a> Emit<'a> {
                 // Add jump to end_block if not terminated
                 self.builder.create(
                     ctx,
-                    ir::Op::new(Type::Void, vec![Attr::Jump(end_block)], OpData::Jump),
+                    ir::Op::new(
+                        Type::Void,
+                        vec![],
+                        OpData::Jump {
+                            target_bb: end_block.clone(),
+                        },
+                    ),
                 )?;
             }
 
             // set current block to end_block
-            self.builder.set_current_block(end_block);
+            self.builder.set_current_block(end_block)?;
         } else if let Some(while_stmt) = cast::<While>(node) {
             let ctx = if let Some(func_idx) = self.current_function {
                 let func = &mut self.program.funcs[func_idx];
@@ -580,11 +632,17 @@ impl<'a> Emit<'a> {
             // jump to while_entry
             self.builder.create(
                 ctx,
-                ir::Op::new(Type::Void, vec![Attr::Jump(while_entry)], OpData::Jump),
+                ir::Op::new(
+                    Type::Void,
+                    vec![],
+                    OpData::Jump {
+                        target_bb: while_entry.clone(),
+                    },
+                ),
             )?;
 
             // while_entry block
-            self.builder.set_current_block(while_entry);
+            self.builder.set_current_block(while_entry.clone())?;
             let cond_op = self.emit(&while_stmt.condition)?;
 
             // Re-acquire ctx
@@ -604,26 +662,25 @@ impl<'a> Emit<'a> {
                 ctx,
                 ir::Op::new(
                     Type::Void,
-                    vec![Attr::Branch {
-                        then_bb: while_body,
-                        else_bb: Some(while_end),
-                    }],
+                    vec![],
                     OpData::Br {
                         cond: cond_op.unwrap(),
+                        then_bb: while_body.clone(),
+                        else_bb: Some(while_end.clone()),
                     },
                 ),
             )?;
 
             // while_body block
-            self.builder.set_current_block(while_body);
+            self.builder.set_current_block(while_body)?;
             // push loop info
-            self.builder.loop_stack.push(LoopInfo {
-                while_entry: Some(while_entry),
-                end_block: Some(while_end),
+            self.builder.push_loop(LoopInfo {
+                while_entry: Some(while_entry.clone()),
+                end_block: Some(while_end.clone()),
             });
             self.emit(&while_stmt.body)?;
             // pop loop info
-            self.builder.loop_stack.pop();
+            self.builder.pop_loop();
 
             // Re-acquire ctx
             let ctx = if let Some(func_idx) = self.current_function {
@@ -640,11 +697,17 @@ impl<'a> Emit<'a> {
             // jump back to while_entry
             self.builder.create(
                 ctx,
-                ir::Op::new(Type::Void, vec![Attr::Jump(while_entry)], OpData::Jump),
+                ir::Op::new(
+                    Type::Void,
+                    vec![],
+                    OpData::Jump {
+                        target_bb: while_entry,
+                    },
+                ),
             )?;
 
             // set current block to while_end
-            self.builder.set_current_block(while_end);
+            self.builder.set_current_block(while_end.clone())?;
         } else if cast::<Break>(node).is_some() {
             let loop_info = self
                 .builder
@@ -666,8 +729,10 @@ impl<'a> Emit<'a> {
                 ctx,
                 ir::Op::new(
                     Type::Void,
-                    vec![Attr::Jump(loop_info.end_block.unwrap())],
-                    OpData::Jump,
+                    vec![],
+                    OpData::Jump {
+                        target_bb: loop_info.end_block.clone().unwrap(),
+                    },
                 ),
             )?;
         } else if cast::<Continue>(node).is_some() {
@@ -692,8 +757,10 @@ impl<'a> Emit<'a> {
                 ctx,
                 ir::Op::new(
                     Type::Void,
-                    vec![Attr::Jump(loop_info.while_entry.unwrap())],
-                    OpData::Jump,
+                    vec![],
+                    OpData::Jump {
+                        target_bb: loop_info.while_entry.clone().unwrap(),
+                    },
                 ),
             )?;
         } else if let Some(assign_stmt) = cast::<Assign>(node) {
@@ -731,9 +798,9 @@ impl<'a> Emit<'a> {
         } else if let Some(var_access) = cast::<VarAccess>(node) {
             // remember, only address.
             if let Some(global_id) = self.globals.get(&var_access.name) {
-                return Ok(Some(global_id.0));
+                return Ok(Some(global_id.clone()));
             } else if let Some(ptr_addr) = self.syms.get(&var_access.name) {
-                return Ok(Some(*ptr_addr));
+                return Ok(Some(ptr_addr.clone()));
             } else {
                 return Err(format!(
                     "VarAccess: variable {} not found in syms or globals",
@@ -775,8 +842,10 @@ impl<'a> Emit<'a> {
                         typ,
                         vec![],
                         OpData::GEP {
-                            base: global_id.0,
-                            indices: index_ops.splice(0..0, std::iter::once(0)).collect(),
+                            base: global_id.clone(),
+                            indices: index_ops
+                                .splice(0..0, std::iter::once(Operand::Int(0)))
+                                .collect(),
                         },
                     ),
                 )?
@@ -792,8 +861,10 @@ impl<'a> Emit<'a> {
                         typ.clone(),
                         vec![],
                         OpData::GEP {
-                            base: global_id.0,
-                            indices: index_ops.splice(0..0, std::iter::once(0)).collect(),
+                            base: global_id.clone(),
+                            indices: index_ops
+                                .splice(0..0, std::iter::once(Operand::Int(0)))
+                                .collect(),
                         },
                     ),
                 )?
@@ -809,15 +880,17 @@ impl<'a> Emit<'a> {
                         typ.clone(),
                         vec![],
                         OpData::GEP {
-                            base: *ptr_addr,
-                            indices: index_ops.splice(0..0, std::iter::once(0)).collect(),
+                            base: ptr_addr.clone(),
+                            indices: index_ops
+                                .splice(0..0, std::iter::once(Operand::Int(0)))
+                                .collect(),
                         },
                     ),
                 )?
             };
         } else if let Some(call) = cast::<Call>(node) {
             // evaluate arguments
-            let mut arg_ops: Vec<OpId> = vec![];
+            let mut arg_ops: Vec<Operand> = vec![];
             for arg in &call.args {
                 let arg_op = self.emit(arg)?;
                 arg_ops.push(arg_op.unwrap());
@@ -839,8 +912,11 @@ impl<'a> Emit<'a> {
                 ctx,
                 ir::Op::new(
                     call.typ.clone(),
-                    vec![Attr::Function(call.func_name.clone())],
-                    OpData::Call { args: arg_ops },
+                    vec![],
+                    OpData::Call {
+                        func: Operand::Symbol(call.func_name.clone()),
+                        args: arg_ops,
+                    },
                 ),
             )?;
             return Ok(Some(call_op));
@@ -973,6 +1049,7 @@ impl<'a> Emit<'a> {
                 }
                 ast::Op::And => {
                     if typ == Type::Int {
+                        // short circuit
                         OpData::And {
                             lhs: lhs.unwrap(),
                             rhs: rhs.unwrap(),
@@ -1102,7 +1179,9 @@ impl<'a> Emit<'a> {
                     ir::Op::new(
                         unary_op.typ.clone(),
                         vec![],
-                        OpData::Load { addr: operand.unwrap() },
+                        OpData::Load {
+                            addr: operand.unwrap(),
+                        },
                     ),
                 )?;
                 // replace operand with loaded value
@@ -1128,9 +1207,10 @@ impl<'a> Emit<'a> {
                 ast::Op::Minus => {
                     if typ == Type::Int {
                         // 0 - rhs
-                        let zero_op = self
-                            .builder
-                            .create(ctx, ir::Op::new(Type::Int, vec![Attr::Int(0)], OpData::Int))?;
+                        let zero_op = self.builder.create(
+                            ctx,
+                            ir::Op::new(Type::Int, vec![], OpData::Int(Operand::Int(0))),
+                        )?;
                         OpData::SubI {
                             lhs: zero_op,
                             rhs: operand.unwrap(),
@@ -1139,7 +1219,7 @@ impl<'a> Emit<'a> {
                         // 0.0 - rhs
                         let zero_op = self.builder.create(
                             ctx,
-                            ir::Op::new(Type::Float, vec![Attr::Float(0.0)], OpData::Float),
+                            ir::Op::new(Type::Float, vec![], OpData::Float(Operand::Float(0.0))),
                         )?;
                         OpData::SubF {
                             lhs: zero_op,
@@ -1150,9 +1230,10 @@ impl<'a> Emit<'a> {
                 ast::Op::Not => {
                     if typ == Type::Int {
                         // 1 - rhs
-                        let zero_op = self
-                            .builder
-                            .create(ctx, ir::Op::new(Type::Int, vec![Attr::Int(0)], OpData::Int))?;
+                        let zero_op = self.builder.create(
+                            ctx,
+                            ir::Op::new(Type::Int, vec![], OpData::Int(Operand::Int(0))),
+                        )?;
                         OpData::SNe {
                             lhs: operand.unwrap(),
                             rhs: zero_op,
@@ -1203,14 +1284,14 @@ impl<'a> Emit<'a> {
                 Literal::Int(val) => {
                     let op_id = self.builder.create(
                         ctx,
-                        ir::Op::new(Type::Int, vec![Attr::Int(*val)], OpData::Int),
+                        ir::Op::new(Type::Int, vec![], OpData::Int(Operand::Int(*val))),
                     )?;
                     return Ok(Some(op_id));
                 }
                 Literal::Float(val) => {
                     let op_id = self.builder.create(
                         ctx,
-                        ir::Op::new(Type::Float, vec![Attr::Float(*val)], OpData::Float),
+                        ir::Op::new(Type::Float, vec![], OpData::Float(Operand::Float(*val))),
                     )?;
                     return Ok(Some(op_id));
                 }
@@ -1230,21 +1311,18 @@ impl<'a> Emit<'a> {
                             Type::Pointer {
                                 base: Box::new(typ.clone()),
                             },
-                            vec![
-                                Attr::Size(typ.size_in_bytes()),
-                                Attr::GlobalArray {
-                                    name: "".to_string(),
-                                    typ: typ.clone(),
-                                    mutable: false,
-                                    values: string
-                                        .chars()
-                                        .map(|c| Literal::Int(c as i32))
-                                        // This chain adds the null terminator
-                                        .chain(std::iter::once(Literal::Int(0)))
-                                        .collect(),
-                                },
-                            ],
-                            OpData::GlobalAlloca,
+                            vec![Attr::GlobalArray {
+                                name: "".to_string(),
+                                typ: typ.clone(),
+                                mutable: false,
+                                values: string
+                                    .chars()
+                                    .map(|c| Literal::Int(c as i32))
+                                    // This chain adds the null terminator
+                                    .chain(std::iter::once(Literal::Int(0)))
+                                    .collect(),
+                            }],
+                            OpData::GlobalAlloca(typ.size_in_bytes()),
                         ),
                     )?;
                     // get the pointer right now
@@ -1257,7 +1335,10 @@ impl<'a> Emit<'a> {
                             vec![],
                             OpData::GEP {
                                 base: global_alloca,
-                                indices: vec![0, /* The first element's addr */ 0],
+                                indices: vec![
+                                    Operand::Int(0),
+                                    /* The first element's addr */ Operand::Int(0),
+                                ],
                             },
                         ),
                     )?;
@@ -1289,7 +1370,7 @@ pub struct MultiDimIter {
 impl MultiDimIter {
     pub fn new(dims: Vec<usize>) -> Self {
         // Handle the edge case of 0-sized dimensions or empty dimensions
-        let is_empty = dims.is_empty() || dims.iter().any(|&d| d == 0);
+        let is_empty = dims.is_empty() || dims.contains(&0);
 
         Self {
             dims: dims.to_vec(),

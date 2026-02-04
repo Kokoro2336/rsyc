@@ -1,122 +1,124 @@
 use std::vec::Vec;
 
 use crate::asm::config::Reg;
-use crate::base::ir::{BBId, GlobalId};
 use crate::base::Type;
 use crate::frontend::ast::Literal;
 use crate::utils::arena::*;
 
-pub type OpId = usize;
-pub type ParamId = u32;
 pub type DFG = IndexedArena<Op>;
 
 #[derive(Debug, Clone)]
 pub enum OpData {
     // customized instructions for convenience
-    GlobalAlloca,
-    GetArg,
+    GlobalAlloca(u32),
+    GetArg(Operand),
+    // for immediate values
+    Int(Operand),
+    Float(Operand),
     // getelementptr
     GEP {
-        base: OpId,
-        indices: Vec<OpId>,
+        base: Operand,
+        // Vec<Index>
+        indices: Vec<Operand>,
     },
-    // for immediate values
-    Int,
-    Float,
+    Move {
+        value: Operand,
+        reg: Reg,
+    },
 
     /* regular instructions */
     /// Integer
     AddI {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
     SubI {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
     MulI {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
     DivI {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
     ModI {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
 
     // The comparisons are logical.
     And {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
     Or {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
     Xor {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
 
     // Comparison(S: Signed. And SysY only has signed comparison)
     SNe {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
     SEq {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
     SGt {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
     SLt {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
     SGe {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
     SLe {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
 
     // Bitwise shift
     Shl {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
     Shr {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
     Sar {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
 
     /// Float
     AddF {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
     SubF {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
     MulF {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
     DivF {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
     // Mod is invalid for float in SysY
 
@@ -124,107 +126,73 @@ pub enum OpData {
 
     // Comparison. SysY doesn't support NaN, so we only have one type of comparison here.
     ONe {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
     OEq {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
     OGt {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
     OLt {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
     OGe {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
     OLe {
-        lhs: OpId,
-        rhs: OpId,
+        lhs: Operand,
+        rhs: Operand,
     },
 
     /// Cast operations
     Sitofp {
-        value: OpId,
+        value: Operand,
     }, // int to float
     Fptosi {
-        value: OpId,
+        value: Operand,
     }, // float to int
 
     // SysY doesn't support bitwise shift for float
     /// Memory operations
     Store {
-        addr: OpId,
-        value: OpId,
+        addr: Operand,
+        value: Operand,
     },
     Load {
-        addr: OpId,
+        addr: Operand,
     },
-    Alloca,
+    Alloca(u32),
 
     /// Control flow
     Call {
-        args: Vec<OpId>,
+        func: Operand,
+        args: Vec<Operand>,
     },
     Br {
-        cond: OpId,
+        cond: Operand,
+        then_bb: Operand,
+        else_bb: Option<Operand>,
     },
-    Jump,
+    Jump {
+        target_bb: Operand,
+    },
     Ret {
-        value: Option<OpId>,
+        value: Option<Operand>,
     },
 }
 
 impl std::fmt::Display for Op {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.data {
-            OpData::Int => write!(
-                f,
-                "{}",
-                self.attrs
-                    .iter()
-                    .find_map(|attr| {
-                        if let Attr::Int(val) = attr {
-                            Some(val)
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(&0)
-            ),
-            OpData::Float => write!(
-                f,
-                "{}",
-                self.attrs
-                    .iter()
-                    .find_map(|attr| {
-                        if let Attr::Float(val) = attr {
-                            Some(val)
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(&0.0)
-            ),
-            OpData::GetArg => write!(
-                f,
-                "get_arg {}",
-                self.attrs
-                    .iter()
-                    .find_map(|attr| {
-                        if let Attr::Param(idx) = attr {
-                            Some(idx)
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(&0)
-            ),
+            OpData::Int(value) => write!(f, "{}", value),
+            OpData::Float(value) => write!(f, "{}", value),
+            OpData::GetArg(idx) => write!(f, "get_arg <idx = {}>", idx),
             OpData::GEP { base, indices } => {
                 write!(f, "gep {}, [", base)?;
                 for (i, index) in indices.iter().enumerate() {
@@ -235,20 +203,8 @@ impl std::fmt::Display for Op {
                 }
                 write!(f, "]")
             }
-            OpData::GlobalAlloca => write!(
-                f,
-                "global_alloc {}",
-                self.attrs
-                    .iter()
-                    .find_map(|attr| {
-                        if let Attr::Symbol(name) = attr {
-                            Some(name)
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(&"".to_string())
-            ),
+            OpData::GlobalAlloca(size) => write!(f, "global_alloc {}", size),
+            OpData::Move { value, reg } => write!(f, "move {}, <reg = {}>", value, reg),
 
             OpData::AddI { lhs, rhs } => write!(f, "add {}, {}", lhs, rhs),
             OpData::SubI { lhs, rhs } => write!(f, "sub {}, {}", lhs, rhs),
@@ -288,83 +244,19 @@ impl std::fmt::Display for Op {
 
             OpData::Store { addr, value } => write!(f, "store {}, {}", addr, value),
             OpData::Load { addr } => write!(f, "load {}", addr),
-            OpData::Alloca => write!(
-                f,
-                "alloc {}",
-                self.attrs
-                    .iter()
-                    .find_map(|attr| {
-                        if let Attr::Size(size) = attr {
-                            Some(size)
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(&0)
-            ),
-            OpData::Call { args } => {
-                write!(
-                    f,
-                    "call {} {:?}",
-                    self.attrs
-                        .iter()
-                        .find(|attr| matches!(attr, Attr::Function(_)))
-                        .map(|attr| {
-                            if let Attr::Function(name) = attr {
-                                name.clone()
-                            } else {
-                                "".to_string()
-                            }
-                        })
-                        .unwrap_or_else(
-                            || Err("Call op missing symbol attribute".to_string()).unwrap()
-                        ),
-                    args
-                )
+            OpData::Alloca(size) => write!(f, "alloc {}", size),
+            OpData::Call { func, args } => {
+                write!(f, "call {} {:?}", func, args)
             }
-            OpData::Br { cond } => write!(
-                f,
-                "br {}, {}, {}",
+            OpData::Br {
                 cond,
-                self.attrs
-                    .iter()
-                    .find_map(|attr| {
-                        if let Attr::Branch { then_bb, .. } = attr {
-                            Some(then_bb)
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(&0),
-                self.attrs
-                    .iter()
-                    .find_map(|attr| {
-                        if let Attr::Branch {
-                            else_bb: Some(else_bb),
-                            ..
-                        } = attr
-                        {
-                            Some(else_bb)
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(&0)
-            ),
-            OpData::Jump => write!(
-                f,
-                "jump {}",
-                self.attrs
-                    .iter()
-                    .find_map(|attr| {
-                        if let Attr::Jump(target_bb) = attr {
-                            Some(target_bb)
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(&0)
-            ),
+                then_bb,
+                else_bb,
+            } => match else_bb {
+                Some(else_bb) => write!(f, "br {}, {}, {}", cond, then_bb, else_bb),
+                None => write!(f, "br {}, {}", cond, then_bb),
+            },
+            OpData::Jump { target_bb } => write!(f, "jump {}", target_bb),
             OpData::Ret { value } => write!(f, "ret {:?}", value),
         }
     }
@@ -374,7 +266,7 @@ pub struct Op {
     pub typ: Type,
     pub attrs: Vec<Attr>,
     pub data: OpData,
-    pub uses: Vec<OpId>,
+    pub uses: Vec<Operand>,
 }
 
 impl Op {
@@ -388,28 +280,90 @@ impl Op {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum Operand {
+    Op(usize),
+    BB(usize),
+    Global(usize),
+    Int(i32),
+    Float(f32),
+    // for GEP
+    Index(usize),
+    // for GetArg
+    ParamId(u32),
+    Symbol(String),
+    Reg(Reg),
+}
+
+impl Operand {
+    pub fn get_op_id(&self) -> Result<usize, String> {
+        match self {
+            Operand::Op(op_id) => Ok(*op_id),
+            _ => Err("Operand is not an OpId".to_string()),
+        }
+    }
+    pub fn get_bb_id(&self) -> Result<usize, String> {
+        match self {
+            Operand::BB(bb_id) => Ok(*bb_id),
+            _ => Err("Operand is not a BBId".to_string()),
+        }
+    }
+    pub fn get_global_id(&self) -> Result<usize, String> {
+        match self {
+            Operand::Global(global_id) => Ok(*global_id),
+            _ => Err("Operand is not a GlobalId".to_string()),
+        }
+    }
+    pub fn get_int(&self) -> Result<i32, String> {
+        match self {
+            Operand::Int(value) => Ok(*value),
+            _ => Err("Operand is not an Int".to_string()),
+        }
+    }
+    pub fn get_float(&self) -> Result<f32, String> {
+        match self {
+            Operand::Float(value) => Ok(*value),
+            _ => Err("Operand is not a Float".to_string()),
+        }
+    }
+    pub fn get_param_id(&self) -> Result<u32, String> {
+        match self {
+            Operand::ParamId(param_id) => Ok(*param_id),
+            _ => Err("Operand is not a ParamId".to_string()),
+        }
+    }
+    pub fn get_symbol(&self) -> Result<String, String> {
+        match self {
+            Operand::Symbol(symbol) => Ok(symbol.clone()),
+            _ => Err("Operand is not a Symbol".to_string()),
+        }
+    }
+    pub fn get_reg(&self) -> Result<Reg, String> {
+        match self {
+            Operand::Reg(reg) => Ok(*reg),
+            _ => Err("Operand is not a Reg".to_string()),
+        }
+    }
+}
+
+impl std::fmt::Display for Operand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Operand::Op(op_id) => write!(f, "%{}", op_id),
+            Operand::BB(bb_id) => write!(f, "%{}", bb_id),
+            Operand::Global(global_id) => write!(f, "@{}", global_id),
+            Operand::Int(value) => write!(f, "{}", value),
+            Operand::Float(value) => write!(f, "{}", value),
+            Operand::Index(index) => write!(f, "<index = {}>", index),
+            Operand::ParamId(param_id) => write!(f, "<param_idx = {}>", param_id),
+            Operand::Symbol(symbol) => write!(f, "@{}", symbol),
+            Operand::Reg(reg) => write!(f, "<reg = {}>", reg),
+        }
+    }
+}
+
 // attributes of instructions
 pub enum Attr {
-    // for pysical register allocation
-    PhysReg(Reg),
-    // for call
-    Function(String),
-    // for Branch
-    Branch {
-        then_bb: BBId,
-        else_bb: Option<BBId>,
-    },
-    Symbol(String),
-    // for Jump
-    Jump(BBId),
-    // for GetArg
-    Param(u32),
-    // for Alloca
-    Size(u32),
-    // for int
-    Int(i32),
-    // for float
-    Float(f32),
     // for global var
     GlobalArray {
         // if mutable -> .data; else .rodata
@@ -423,21 +377,6 @@ pub enum Attr {
 impl std::fmt::Display for Attr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Attr::PhysReg(reg) => write!(f, "<phys_reg = {}>", reg),
-            Attr::Function(name) => write!(f, "<function = {}>", name),
-            Attr::Branch { then_bb, else_bb } => {
-                if let Some(else_bb) = else_bb {
-                    write!(f, "<branch then: {}, else: {}>", then_bb, else_bb)
-                } else {
-                    write!(f, "<branch then: {}>", then_bb)
-                }
-            }
-            Attr::Symbol(name) => write!(f, "<symbol = {}>", name),
-            Attr::Jump(target_bb) => write!(f, "<jump target: {}>", target_bb),
-            Attr::Param(idx) => write!(f, "<param idx: {}>", idx),
-            Attr::Size(size) => write!(f, "<alloca size: {}>", size),
-            Attr::Int(val) => write!(f, "<int: {}>", val),
-            Attr::Float(val) => write!(f, "<float: {}>", val),
             Attr::GlobalArray {
                 name,
                 mutable: _,
@@ -450,7 +389,7 @@ impl std::fmt::Display for Attr {
 
 // impl dfg
 impl Arena<Op> for IndexedArena<Op> {
-    fn remove(&mut self, idx: OpId) -> Result<OpId, String> {
+    fn remove(&mut self, idx: usize) -> Result<usize, String> {
         // mark this slot as deleted
         self.storage[idx] = ArenaItem::None;
         Ok(idx)
@@ -473,14 +412,14 @@ impl Arena<Op> for IndexedArena<Op> {
         for item in new_arena.iter_mut() {
             // item can't be any other variant than Data here
             if let ArenaItem::Data(node) = item {
+                // rewrite uses
                 for use_idx in node.uses.iter_mut() {
-                    *use_idx = match self.storage[*use_idx] {
-                        ArenaItem::NewIndex(new_idx) => new_idx,
-                        _ => *use_idx,
+                    if let ArenaItem::NewIndex(new_idx) = self.storage[use_idx.get_op_id()?] {
+                        *use_idx = Operand::Op(new_idx);
                     };
                 }
 
-                // rewrite operands
+                // rewrite operands excluding BBId
                 match &mut node.data {
                     OpData::AddI { lhs, rhs }
                     | OpData::SubI { lhs, rhs }
@@ -509,82 +448,77 @@ impl Arena<Op> for IndexedArena<Op> {
                     | OpData::OLt { lhs, rhs }
                     | OpData::OGe { lhs, rhs }
                     | OpData::OLe { lhs, rhs } => {
-                        *lhs = match self.storage[*lhs] {
-                            ArenaItem::NewIndex(new_idx) => new_idx,
-                            _ => *lhs,
+                        if let ArenaItem::NewIndex(new_idx) = self.storage[lhs.get_op_id()?] {
+                            *lhs = Operand::Op(new_idx);
                         };
-                        *rhs = match self.storage[*rhs] {
-                            ArenaItem::NewIndex(new_idx) => new_idx,
-                            _ => *rhs,
+                        if let ArenaItem::NewIndex(new_idx) = self.storage[rhs.get_op_id()?] {
+                            *rhs = Operand::Op(new_idx);
                         };
                     }
 
                     OpData::Sitofp { value } | OpData::Fptosi { value } => {
-                        *value = match self.storage[*value] {
-                            ArenaItem::NewIndex(new_idx) => new_idx,
-                            _ => *value,
+                        if let ArenaItem::NewIndex(new_idx) = self.storage[value.get_op_id()?] {
+                            *value = Operand::Op(new_idx);
                         };
                     }
                     OpData::Store { addr, value } => {
-                        *addr = match self.storage[*addr] {
-                            ArenaItem::NewIndex(new_idx) => new_idx,
-                            _ => *addr,
+                        if let ArenaItem::NewIndex(new_idx) = self.storage[addr.get_op_id()?] {
+                            *addr = Operand::Op(new_idx);
                         };
-                        *value = match self.storage[*value] {
-                            ArenaItem::NewIndex(new_idx) => new_idx,
-                            _ => *value,
+                        if let ArenaItem::NewIndex(new_idx) = self.storage[value.get_op_id()?] {
+                            *value = Operand::Op(new_idx);
                         };
                     }
                     OpData::Load { addr } => {
-                        *addr = match self.storage[*addr] {
-                            ArenaItem::NewIndex(new_idx) => new_idx,
-                            _ => *addr,
+                        if let ArenaItem::NewIndex(new_idx) = self.storage[addr.get_op_id()?] {
+                            *addr = Operand::Op(new_idx);
                         };
                     }
-                    OpData::Call { args } => {
+                    OpData::Call { args, .. } => {
                         for arg in args.iter_mut() {
-                            *arg = match self.storage[*arg] {
-                                ArenaItem::NewIndex(new_idx) => new_idx,
-                                _ => *arg,
+                            if let ArenaItem::NewIndex(new_idx) = self.storage[arg.get_op_id()?] {
+                                *arg = Operand::Op(new_idx);
                             };
                         }
                     }
-                    OpData::Br { cond } => {
-                        *cond = match self.storage[*cond] {
-                            ArenaItem::NewIndex(new_idx) => new_idx,
-                            _ => *cond,
+                    OpData::Br { cond, .. } => {
+                        if let ArenaItem::NewIndex(new_idx) = self.storage[cond.get_op_id()?] {
+                            *cond = Operand::Op(new_idx);
                         };
                     }
                     OpData::Ret { value } => {
                         if let Some(val) = value {
-                            *val = match self.storage[*val] {
-                                ArenaItem::NewIndex(new_idx) => new_idx,
-                                _ => *val,
+                            if let ArenaItem::NewIndex(new_idx) = self.storage[val.get_op_id()?] {
+                                *val = Operand::Op(new_idx);
                             };
                         }
                     }
 
                     OpData::GEP { base, indices } => {
-                        *base = match self.storage[*base] {
-                            ArenaItem::NewIndex(new_idx) => new_idx,
-                            _ => *base,
+                        if let ArenaItem::NewIndex(new_idx) = self.storage[base.get_op_id()?] {
+                            *base = Operand::Op(new_idx);
                         };
                         for index in indices.iter_mut() {
-                            *index = match self.storage[*index] {
-                                ArenaItem::NewIndex(new_idx) => new_idx,
-                                _ => *index,
+                            if let ArenaItem::NewIndex(new_idx) = self.storage[index.get_op_id()?] {
+                                *index = Operand::Op(new_idx);
                             };
                         }
                     }
 
+                    OpData::Move { value, .. } => {
+                        if let ArenaItem::NewIndex(new_idx) = self.storage[value.get_op_id()?] {
+                            *value = Operand::Op(new_idx);
+                        };
+                    }
+
                     // Get global should be processed outside of gc()
                     // TODO: As long as program global arena is not changed, the indices are stable.
-                    OpData::GlobalAlloca
-                    | OpData::GetArg
-                    | OpData::Int
-                    | OpData::Float
-                    | OpData::Alloca
-                    | OpData::Jump => { /* no operands to rewrite */ }
+                    OpData::GlobalAlloca { .. }
+                    | OpData::GetArg { .. }
+                    | OpData::Int(_)
+                    | OpData::Float(_)
+                    | OpData::Alloca(_)
+                    | OpData::Jump { .. } => { /* no operands to rewrite */ }
                 }
             }
         }
@@ -595,8 +529,8 @@ impl Arena<Op> for IndexedArena<Op> {
 }
 
 impl IndexedArena<Op> {
-    pub fn add_use(&mut self, op_idx: OpId, use_idx: OpId) -> Result<(), String> {
-        if let Some(node) = self.get_mut(op_idx)? {
+    pub fn add_use(&mut self, op_idx: Operand, use_idx: Operand) -> Result<(), String> {
+        if let Some(node) = self.get_mut(op_idx.get_op_id()?)? {
             node.uses.push(use_idx);
             Ok(())
         } else {

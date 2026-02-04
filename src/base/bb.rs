@@ -1,25 +1,21 @@
-use crate::base::ir::{OpId, DFG};
+use crate::base::ir::{OpData, Operand, DFG};
 use crate::utils::arena::*;
 
-pub type BBId = usize;
 pub type CFG = IndexedArena<BasicBlock>;
-
-// We need strictly separate GlobalId from OpId to avoid confusion.
-#[derive(Clone, Copy, Debug)]
-pub struct GlobalId(pub usize);
+pub type CG = IndexedArena<Function>;
 
 pub struct Program {
     // global vars
     pub globals: DFG,
     // global funcs
-    pub funcs: Vec<Function>,
+    pub funcs: CG,
 }
 
 impl Program {
     pub fn new() -> Self {
         Self {
             globals: DFG::new(),
-            funcs: vec![],
+            funcs: CG::new(),
         }
     }
 }
@@ -47,9 +43,9 @@ impl Function {
 }
 
 pub struct BasicBlock {
-    pub preds: Vec<BBId>,
-    pub cur: Vec<OpId>,
-    pub succs: Vec<BBId>,
+    pub preds: Vec<Operand>,
+    pub cur: Vec<Operand>,
+    pub succs: Vec<Operand>,
 }
 
 impl BasicBlock {
@@ -64,7 +60,7 @@ impl BasicBlock {
 
 // impl cfg
 impl Arena<BasicBlock> for IndexedArena<BasicBlock> {
-    fn remove(&mut self, idx: BBId) -> Result<BBId, String> {
+    fn remove(&mut self, idx: usize) -> Result<usize, String> {
         // TODO
         unimplemented!()
     }
@@ -94,8 +90,8 @@ impl Arena<BasicBlock> for IndexedArena<BasicBlock> {
             // item can't be any other variant than Data here
             if let ArenaItem::Data(node) = item {
                 for pred in node.preds.iter_mut() {
-                    *pred = match old_arena.get(*pred).unwrap() {
-                        ArenaItem::NewIndex(new_idx) => *new_idx,
+                    *pred = match old_arena.get(pred.get_bb_id()?).unwrap() {
+                        ArenaItem::NewIndex(new_idx) => Operand::BB(*new_idx),
                         _ => {
                             return Err("CFG gc: predecessor index not found".to_string());
                         }
@@ -103,8 +99,8 @@ impl Arena<BasicBlock> for IndexedArena<BasicBlock> {
                 }
                 // rewrite data.cur needs the old arena of DFG, we'll do it in Compaction pass
                 for succ in node.succs.iter_mut() {
-                    *succ = match old_arena.get(*succ).unwrap() {
-                        ArenaItem::NewIndex(new_idx) => *new_idx,
+                    *succ = match old_arena.get(succ.get_bb_id()?).unwrap() {
+                        ArenaItem::NewIndex(new_idx) => Operand::BB(*new_idx),
                         _ => {
                             return Err("CFG gc: successor index not found".to_string());
                         }
@@ -115,5 +111,186 @@ impl Arena<BasicBlock> for IndexedArena<BasicBlock> {
 
         // replace old storage
         Ok(old_arena)
+    }
+}
+
+impl Arena<Function> for IndexedArena<Function> {
+    fn remove(&mut self, idx: usize) -> Result<usize, String> {
+        // TODO
+        todo!()
+    }
+
+    fn gc(&mut self) -> Result<Vec<ArenaItem<Function>>, String> {
+        let new_arena: Vec<ArenaItem<Function>> = vec![];
+        let old_arena = std::mem::replace(&mut self.storage, new_arena);
+
+        // Transport
+        let old_arena = old_arena
+            .into_iter()
+            .map(|mut item| {
+                if matches!(item, ArenaItem::Data(_)) {
+                    let new_idx = self.storage.len();
+                    let data = item.replace(new_idx);
+                    self.storage.push(data);
+                    ArenaItem::NewIndex(new_idx)
+                } else {
+                    ArenaItem::None
+                }
+            })
+            .collect::<Vec<ArenaItem<Function>>>();
+
+        // No need to rewrite anything inside Function for now
+        self.storage
+            .iter_mut()
+            .try_for_each(|func| -> Result<(), String> {
+                if let ArenaItem::Data(func) = func {
+                    let old_arena_dfg = func.dfg.gc()?;
+                    let old_arena_cfg = func.cfg.gc()?;
+                    // TODO: We don't need to clean globals for now.
+
+                    // rewrite op refs in BasicBlocks
+                    func.cfg
+                        .storage
+                        .iter_mut()
+                        .try_for_each(|item| -> Result<(), String> {
+                            if let ArenaItem::Data(bb) = item {
+                                for op_idx in bb.cur.iter_mut() {
+                                    *op_idx = match old_arena_dfg.get(op_idx.get_op_id()?).unwrap()
+                                    {
+                                        ArenaItem::NewIndex(new_idx) => Operand::Op(*new_idx),
+                                        _ => {
+                                            return Err("Compaction gc: op index in BB not found"
+                                                .to_string());
+                                        }
+                                    };
+                                }
+                            }
+                            Ok(())
+                        })?;
+
+                    // rewrite BBId in dfg ops
+                    func.dfg
+                        .storage
+                        .iter_mut()
+                        .try_for_each(|item| -> Result<(), String> {
+                            if let ArenaItem::Data(op) = item {
+                                match &mut op.data {
+                                    OpData::Jump { target_bb } => {
+                                        *target_bb = match old_arena_cfg
+                                            .get(target_bb.get_bb_id()?)
+                                            .unwrap()
+                                        {
+                                            ArenaItem::NewIndex(new_idx) => Operand::BB(*new_idx),
+                                            _ => {
+                                                return Err(
+                                                    "Compaction gc: BB index in Op not found"
+                                                        .to_string(),
+                                                );
+                                            }
+                                        };
+                                    }
+                                    OpData::Br {
+                                        then_bb, else_bb, ..
+                                    } => {
+                                        *then_bb = match old_arena_cfg
+                                            .get(then_bb.get_bb_id()?)
+                                            .unwrap()
+                                        {
+                                            ArenaItem::NewIndex(new_idx) => Operand::BB(*new_idx),
+                                            _ => {
+                                                return Err(
+                                                    "Compaction gc: BB index in Op not found"
+                                                        .to_string(),
+                                                );
+                                            }
+                                        };
+                                        if let Some(else_bb) = else_bb {
+                                            *else_bb = match old_arena_cfg
+                                                .get(else_bb.get_bb_id()?)
+                                                .unwrap()
+                                            {
+                                                ArenaItem::NewIndex(new_idx) => {
+                                                    Operand::BB(*new_idx)
+                                                }
+                                                _ => {
+                                                    return Err(
+                                                        "Compaction gc: BB index in Op not found"
+                                                            .to_string(),
+                                                    );
+                                                }
+                                            };
+                                        }
+                                    }
+
+                                    OpData::AddF { .. }
+                                    | OpData::SubF { .. }
+                                    | OpData::MulF { .. }
+                                    | OpData::DivF { .. }
+                                    | OpData::AddI { .. }
+                                    | OpData::SubI { .. }
+                                    | OpData::MulI { .. }
+                                    | OpData::DivI { .. }
+                                    | OpData::ModI { .. }
+                                    | OpData::Load { .. }
+                                    | OpData::Store { .. }
+                                    | OpData::Alloca(_)
+                                    | OpData::GlobalAlloca { .. }
+                                    | OpData::GetArg { .. }
+                                    | OpData::Int(_)
+                                    | OpData::Float(_)
+                                    | OpData::Call { .. }
+                                    | OpData::Move { .. }
+                                    | OpData::GEP { .. }
+                                    | OpData::Sitofp { .. }
+                                    | OpData::Fptosi { .. }
+                                    | OpData::Ret { .. }
+                                    | OpData::Shl { .. }
+                                    | OpData::Shr { .. }
+                                    | OpData::Sar { .. }
+                                    | OpData::SNe { .. }
+                                    | OpData::SEq { .. }
+                                    | OpData::And { .. }
+                                    | OpData::Or { .. }
+                                    | OpData::Xor { .. }
+                                    | OpData::SGt { .. }
+                                    | OpData::SLt { .. }
+                                    | OpData::SGe { .. }
+                                    | OpData::SLe { .. }
+                                    | OpData::ONe { .. }
+                                    | OpData::OEq { .. }
+                                    | OpData::OGt { .. }
+                                    | OpData::OLt { .. }
+                                    | OpData::OGe { .. }
+                                    | OpData::OLe { .. } => { /* no BBId to rewrite */ }
+                                }
+                            }
+                            Ok(())
+                        })?;
+                }
+                Ok(())
+            })?;
+
+        // replace old storage
+        Ok(old_arena)
+    }
+}
+
+impl IndexedArena<Function> {
+    pub fn add(&mut self, func: Function) -> Result<usize, String> {
+        Ok(self.alloc(func)?)
+    }
+}
+
+impl std::ops::Index<usize> for IndexedArena<Function> {
+    type Output = Function;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        self.get(index).unwrap().unwrap()
+    }
+}
+
+impl std::ops::IndexMut<usize> for IndexedArena<Function> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        self.get_mut(index).unwrap().unwrap()
     }
 }
