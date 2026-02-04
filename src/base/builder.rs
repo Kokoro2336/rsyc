@@ -42,6 +42,10 @@ impl Builder {
         self.branch_stack.pop()
     }
 
+    pub fn get_branch_info(&mut self) -> Option<&mut BranchInfo> {
+        self.branch_stack.last_mut()
+    }
+
     pub fn current_loop(&mut self) -> Option<&mut LoopInfo> {
         self.loop_stack.last_mut()
     }
@@ -114,6 +118,7 @@ impl Builder {
         Ok(())
     }
 
+    // constructing data flow
     pub fn add_uses(&mut self, ctx: &mut BuilderContext, op: Operand) -> Result<(), String> {
         let dfg = if ctx.dfg.is_none() {
             return Err("Builder add_uses: ctx.dfg is None".to_string());
@@ -207,6 +212,104 @@ impl Builder {
         Ok(())
     }
 
+    // constructing control flow
+    pub fn add_control_flow(
+        &mut self,
+        ctx: &mut BuilderContext,
+        op: Operand,
+    ) -> Result<(), String> {
+        let cfg = if ctx.cfg.is_none() {
+            return Err("Builder add_control_flow: ctx.cfg is None".to_string());
+        } else {
+            ctx.cfg.as_mut().unwrap()
+        };
+        let dfg = if ctx.dfg.is_none() {
+            return Err("Builder add_control_flow: ctx.dfg is None".to_string());
+        } else {
+            ctx.dfg.as_mut().unwrap()
+        };
+
+        let bb = cfg.get(op.get_bb_id()?)?;
+        let bb = if bb.is_none() {
+            return Err("Builder add_control_flow: op points to None".to_string());
+        } else {
+            bb.unwrap()
+        };
+        let data = dfg.get(op.get_op_id()?)?;
+        let data = if data.is_none() {
+            return Err("Builder add_control_flow: op points to None".to_string());
+        } else {
+            data.unwrap().data.clone()
+        };
+
+        let current_bb = if self.current_block.is_none() {
+            return Err("Builder add_control_flow: current_block is None".to_string());
+        } else {
+            self.current_block.as_ref().unwrap().clone()
+        };
+
+        match data {
+            OpData::Br {
+                then_bb, else_bb, ..
+            } => {
+                cfg.add_pred(then_bb.clone(), current_bb.clone())?;
+                cfg.add_succ(current_bb.clone(), then_bb)?;
+                if let Some(else_bb) = else_bb {
+                    cfg.add_pred(else_bb.clone(), current_bb.clone())?;
+                    cfg.add_succ(current_bb, else_bb)?;
+                }
+            }
+            OpData::Jump { target_bb } => {
+                cfg.add_pred(target_bb.clone(), current_bb.clone())?;
+                cfg.add_succ(current_bb, target_bb)?;
+            }
+
+            OpData::AddF { .. }
+            | OpData::SubF { .. }
+            | OpData::MulF { .. }
+            | OpData::DivF { .. }
+            | OpData::AddI { .. }
+            | OpData::SubI { .. }
+            | OpData::MulI { .. }
+            | OpData::DivI { .. }
+            | OpData::ModI { .. }
+            | OpData::Load { .. }
+            | OpData::Store { .. }
+            | OpData::Alloca(_)
+            | OpData::GlobalAlloca { .. }
+            | OpData::GetArg { .. }
+            | OpData::Int(_)
+            | OpData::Float(_)
+            | OpData::Call { .. }
+            | OpData::Move { .. }
+            | OpData::GEP { .. }
+            | OpData::Sitofp { .. }
+            | OpData::Fptosi { .. }
+            | OpData::Ret { .. }
+            | OpData::Shl { .. }
+            | OpData::Shr { .. }
+            | OpData::Sar { .. }
+            | OpData::SNe { .. }
+            | OpData::SEq { .. }
+            | OpData::And { .. }
+            | OpData::Or { .. }
+            | OpData::Xor { .. }
+            | OpData::SGt { .. }
+            | OpData::SLt { .. }
+            | OpData::SGe { .. }
+            | OpData::SLe { .. }
+            | OpData::ONe { .. }
+            | OpData::OEq { .. }
+            | OpData::OGt { .. }
+            | OpData::OLt { .. }
+            | OpData::OGe { .. }
+            | OpData::OLe { .. } => {
+                return Err("Builder add_control_flow: not a control flow instruction".to_string())
+            }
+        }
+        Ok(())
+    }
+
     // create an instruction after current instruction
     pub fn create(&mut self, ctx: &mut BuilderContext, op: Op) -> Result<Operand, String> {
         match op.data {
@@ -244,7 +347,7 @@ impl Builder {
                     bb.unwrap()
                 };
 
-                if let Some(current_inst) = &self.current_inst {
+                let op_id = if let Some(current_inst) = &self.current_inst {
                     // insert before current_inst
                     let pos = bb
                         .cur
@@ -266,13 +369,21 @@ impl Builder {
                                 current_inst, self.current_block
                             )
                         })?;
-                    bb.cur.insert(pos, Operand::Op(op_id));
+                    let op_id = Operand::Op(op_id);
+                    bb.cur.insert(pos, op_id.clone());
+                    op_id
                 } else {
                     // insert at the end
-                    bb.cur.push(Operand::Op(op_id));
-                }
+                    let op_id = Operand::Op(op_id);
+                    bb.cur.push(op_id.clone());
+                    op_id
+                };
+                // add uses
+                self.add_uses(ctx, op_id.clone())?;
+                // add control flow info if needed
+                self.add_control_flow(ctx, op_id.clone())?;
                 // We don't update current_inst, so that the next created instruction is still before the same instruction
-                Ok(Operand::Op(op_id))
+                Ok(op_id)
             }
         }
     }
@@ -285,34 +396,5 @@ impl Builder {
         let bb_id = cfg.alloc(BasicBlock::new())?;
         // we separate block creation and setting current block
         Ok(Operand::BB(bb_id))
-    }
-}
-
-pub struct BuilderGuard<'a> {
-    pub builder: &'a mut Builder,
-    pub saved_loop_stack: Vec<LoopInfo>,
-    pub saved_block: Option<Operand>,
-    pub saved_inst: Option<Operand>,
-}
-
-impl<'a> BuilderGuard<'a> {
-    pub fn new(builder: &'a mut Builder) -> Self {
-        let saved_loop_stack = std::mem::take(&mut builder.loop_stack);
-        let saved_block = builder.current_block.clone();
-        let saved_inst = builder.current_inst.clone();
-        Self {
-            builder,
-            saved_block,
-            saved_loop_stack,
-            saved_inst,
-        }
-    }
-}
-
-impl Drop for BuilderGuard<'_> {
-    fn drop(&mut self) {
-        self.builder.loop_stack = std::mem::take(&mut self.saved_loop_stack);
-        self.builder.current_block = std::mem::take(&mut self.saved_block);
-        self.builder.current_inst = std::mem::take(&mut self.saved_inst);
     }
 }

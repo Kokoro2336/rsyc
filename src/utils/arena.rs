@@ -2,6 +2,8 @@
  * Simple arena allocator for indexed storage of values.
  * Faster retrieval by index compared to HashMap.
  */
+use std::collections::HashMap;
+use std::ops::{Index, IndexMut};
 
 pub trait Arena<T> {
     fn remove(&mut self, idx: usize) -> Result<usize, String>;
@@ -24,25 +26,52 @@ impl<T> ArenaItem<T> {
 }
 
 pub struct IndexedArena<T> {
+    pub entry: Option<usize>,
+    pub map: HashMap<String, usize>,
     pub storage: Vec<ArenaItem<T>>,
 }
 
 impl<T> IndexedArena<T> {
     pub fn new() -> Self {
         Self {
+            entry: None,
+            map: HashMap::new(),
             storage: vec![ArenaItem::None],
         }
     }
 
-    pub fn alloc(&mut self, data: T) -> Result<usize, &str> {
+    pub fn alloc(&mut self, data: T) -> Result<usize, String> {
         let index = self.storage.len();
+        // if it's the first element, set it as head.
+        if index == 0 {
+            self.entry = Some(index);
+        }
         self.storage.push(ArenaItem::Data(data));
         Ok(index)
     }
 
-    pub fn get(&self, idx: usize) -> Result<Option<&T>, &str> {
+    pub fn set_entry(&mut self, idx: usize) -> Result<(), String> {
+        self.entry = Some(idx);
+        Ok(())
+    }
+
+    pub fn get_by_name(&self, name: String) -> Result<Option<&T>, String> {
+        match self.map.get(&name) {
+            Some(&idx) => self.get(idx),
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_mut_by_name(&mut self, name: String) -> Result<Option<&mut T>, String> {
+        match self.map.get(&name) {
+            Some(&idx) => self.get_mut(idx),
+            None => Ok(None),
+        }
+    }
+
+    pub fn get(&self, idx: usize) -> Result<Option<&T>, String> {
         if idx >= self.storage.len() {
-            return Err("IndexedArena insert: index out of bounds");
+            return Err("IndexedArena insert: index out of bounds".to_string());
         }
         // match None: the arena is empty
         // match Some(AreanaItem::Data): the arena has data at idx
@@ -52,7 +81,7 @@ impl<T> IndexedArena<T> {
             self.storage.get(idx),
             Some(ArenaItem::None) | Some(ArenaItem::NewIndex(_))
         ) {
-            return Err("IndexedArena get: index points to None or NewIndex");
+            return Err("IndexedArena get: index points to None or NewIndex".to_string());
         }
         match self.storage.get(idx) {
             Some(ArenaItem::Data(node)) => Ok(Some(node)),
@@ -60,19 +89,47 @@ impl<T> IndexedArena<T> {
         }
     }
 
-    pub fn get_mut(&mut self, idx: usize) -> Result<Option<&mut T>, &str> {
+    pub fn get_mut(&mut self, idx: usize) -> Result<Option<&mut T>, String> {
         if idx >= self.storage.len() {
-            return Err("IndexedArena insert: index out of bounds");
+            return Err("IndexedArena insert: index out of bounds".to_string());
         }
         if matches!(
             self.storage.get(idx),
             Some(ArenaItem::None) | Some(ArenaItem::NewIndex(_))
         ) {
-            return Err("IndexedArena get_mut: index points to None or NewIndex");
+            return Err("IndexedArena get_mut: index points to None or NewIndex".to_string());
         }
         match self.storage.get_mut(idx) {
             Some(ArenaItem::Data(node)) => Ok(Some(node)),
             _ => Ok(None),
         }
+    }
+}
+
+impl<T> Index<usize> for IndexedArena<T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        self.get(index).unwrap().unwrap()
+    }
+}
+
+impl<T> IndexMut<usize> for IndexedArena<T> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        self.get_mut(index).unwrap().unwrap()
+    }
+}
+
+impl<T> Index<String> for IndexedArena<T> {
+    type Output = T;
+
+    fn index(&self, index: String) -> &Self::Output {
+        self.get_by_name(index).unwrap().unwrap()
+    }
+}
+
+impl<T> IndexMut<String> for IndexedArena<T> {
+    fn index_mut(&mut self, index: String) -> &mut Self::Output {
+        self.get_mut_by_name(index).unwrap().unwrap()
     }
 }

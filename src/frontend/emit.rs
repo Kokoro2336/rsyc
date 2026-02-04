@@ -32,6 +32,40 @@ pub struct Emit<'a> {
     str_counter: u32,
 }
 
+macro_rules! context {
+    ($self:ident) => {
+        if let Some(func_idx) = $self.current_function {
+            let func = &mut $self.program.funcs[func_idx];
+            &mut BuilderContext {
+                cfg: Some(&mut func.cfg),
+                dfg: Some(&mut func.dfg),
+                globals: &mut $self.program.globals,
+            }
+        } else {
+            &mut BuilderContext {
+                cfg: None,
+                dfg: None,
+                globals: &mut $self.program.globals,
+            }
+        }
+    };
+}
+
+macro_rules! context_or_err {
+    ($self:ident, $msg:expr) => {
+        if let Some(func_idx) = $self.current_function {
+            let func = &mut $self.program.funcs[func_idx];
+            &mut BuilderContext {
+                cfg: Some(&mut func.cfg),
+                dfg: Some(&mut func.dfg),
+                globals: &mut $self.program.globals,
+            }
+        } else {
+            return Err($msg.to_string());
+        }
+    };
+}
+
 impl<'a> Emit<'a> {
     pub fn new(builder: Builder, root: &'a Box<dyn Node>) -> Self {
         Self {
@@ -55,20 +89,12 @@ impl<'a> Emit<'a> {
                     .funcs
                     .add(Function::new(fn_decl.name.clone()))?,
             );
-            let func = &mut self
-                .program
-                .funcs
-                .get_mut(self.current_function.unwrap())?
-                .unwrap();
-
+            
             // get and store arguments
             // shadow the ctx to use function's cfg/dfg
             // in other branches, the ctx is already function's ctx
-            let ctx = &mut BuilderContext {
-                cfg: Some(&mut func.cfg),
-                dfg: Some(&mut func.dfg),
-                globals: &mut self.program.globals,
-            };
+            let ctx = context_or_err!(self, "Function not found");
+
             //create new block for function
             let block_id = self.builder.create_new_block(ctx)?;
             self.builder.set_current_block(block_id)?;
@@ -129,20 +155,7 @@ impl<'a> Emit<'a> {
             self.syms.exit_scope();
             return Ok(None);
         } else if let Some(block) = cast::<Block>(node) {
-            let ctx = if let Some(func_idx) = self.current_function {
-                let func = &mut self.program.funcs[func_idx];
-                &mut BuilderContext {
-                    cfg: Some(&mut func.cfg),
-                    dfg: Some(&mut func.dfg),
-                    globals: &mut self.program.globals,
-                }
-            } else {
-                &mut BuilderContext {
-                    cfg: None,
-                    dfg: None,
-                    globals: &mut self.program.globals,
-                }
-            };
+            let ctx = context!(self);
             // create new block
             let block_id = self.builder.create_new_block(ctx)?;
             self.builder.set_current_block(block_id)?;
@@ -159,20 +172,7 @@ impl<'a> Emit<'a> {
             // exit scope
             self.syms.exit_scope();
         } else if let Some(var_decl) = cast::<VarDecl>(node) {
-            let ctx = if let Some(func_idx) = self.current_function {
-                let func = &mut self.program.funcs[func_idx];
-                &mut BuilderContext {
-                    cfg: Some(&mut func.cfg),
-                    dfg: Some(&mut func.dfg),
-                    globals: &mut self.program.globals,
-                }
-            } else {
-                &mut BuilderContext {
-                    cfg: None,
-                    dfg: None,
-                    globals: &mut self.program.globals,
-                }
-            };
+            let ctx = context!(self);
 
             // Global alloca
             if var_decl.is_global {
@@ -228,16 +228,7 @@ impl<'a> Emit<'a> {
                 if let Some(init_val) = &var_decl.init_value {
                     let op_id = self.emit(init_val)?;
                     // Re-acquire ctx after emit
-                    let ctx = if let Some(func_idx) = self.current_function {
-                        let func = &mut self.program.funcs[func_idx];
-                        &mut BuilderContext {
-                            cfg: Some(&mut func.cfg),
-                            dfg: Some(&mut func.dfg),
-                            globals: &mut self.program.globals,
-                        }
-                    } else {
-                        panic!("Local variable init outside function");
-                    };
+                    let ctx = context_or_err!(self, "Local variable init outside function");
 
                     self.builder.create(
                         ctx,
@@ -255,20 +246,7 @@ impl<'a> Emit<'a> {
             }
             return Ok(None);
         } else if let Some(var_array) = cast::<VarArray>(node) {
-            let ctx = if let Some(func_idx) = self.current_function {
-                let func = &mut self.program.funcs[func_idx];
-                &mut BuilderContext {
-                    cfg: Some(&mut func.cfg),
-                    dfg: Some(&mut func.dfg),
-                    globals: &mut self.program.globals,
-                }
-            } else {
-                &mut BuilderContext {
-                    cfg: None,
-                    dfg: None,
-                    globals: &mut self.program.globals,
-                }
-            };
+            let ctx = context!(self);
 
             if var_array.is_global {
                 // Global alloca
@@ -340,16 +318,7 @@ impl<'a> Emit<'a> {
                         let op_id = self.emit(&init_values[idx])?;
 
                         // Re-acquire ctx
-                        let ctx = if let Some(func_idx) = self.current_function {
-                            let func = &mut self.program.funcs[func_idx];
-                            &mut BuilderContext {
-                                cfg: Some(&mut func.cfg),
-                                dfg: Some(&mut func.dfg),
-                                globals: &mut self.program.globals,
-                            }
-                        } else {
-                            panic!("Local array init outside function");
-                        };
+                        let ctx = context_or_err!(self, "Local array init outside function");
 
                         // evaluate the address
                         let addr = self.builder.create(
@@ -390,20 +359,7 @@ impl<'a> Emit<'a> {
                 None
             };
 
-            let ctx = if let Some(func_idx) = self.current_function {
-                let func = &mut self.program.funcs[func_idx];
-                &mut BuilderContext {
-                    cfg: Some(&mut func.cfg),
-                    dfg: Some(&mut func.dfg),
-                    globals: &mut self.program.globals,
-                }
-            } else {
-                &mut BuilderContext {
-                    cfg: None,
-                    dfg: None,
-                    globals: &mut self.program.globals,
-                }
-            };
+            let ctx = context!(self);
 
             let name = if let Some(func_name) = func_name_opt {
                 // promote the const array to global
@@ -454,16 +410,7 @@ impl<'a> Emit<'a> {
         } else if let Some(ret) = cast::<Return>(node) {
             if let Some(ret_val) = &ret.0 {
                 let op_id = self.emit(ret_val)?;
-                let ctx = if let Some(func_idx) = self.current_function {
-                    let func = &mut self.program.funcs[func_idx];
-                    &mut BuilderContext {
-                        cfg: Some(&mut func.cfg),
-                        dfg: Some(&mut func.dfg),
-                        globals: &mut self.program.globals,
-                    }
-                } else {
-                    panic!("Return outside function");
-                };
+                let ctx = context_or_err!(self, "Return outside function");
 
                 self.builder.create(
                     ctx,
@@ -476,16 +423,7 @@ impl<'a> Emit<'a> {
                     ),
                 )?;
             } else {
-                let ctx = if let Some(func_idx) = self.current_function {
-                    let func = &mut self.program.funcs[func_idx];
-                    &mut BuilderContext {
-                        cfg: Some(&mut func.cfg),
-                        dfg: Some(&mut func.dfg),
-                        globals: &mut self.program.globals,
-                    }
-                } else {
-                    panic!("Return outside function");
-                };
+                let ctx = context_or_err!(self, "Return outside function");
 
                 self.builder.create(
                     ctx,
@@ -494,16 +432,7 @@ impl<'a> Emit<'a> {
             }
         } else if let Some(if_stmt) = cast::<If>(node) {
             let (then_block, else_block, end_block) = {
-                let ctx = if let Some(func_idx) = self.current_function {
-                    let func = &mut self.program.funcs[func_idx];
-                    &mut BuilderContext {
-                        cfg: Some(&mut func.cfg),
-                        dfg: Some(&mut func.dfg),
-                        globals: &mut self.program.globals,
-                    }
-                } else {
-                    panic!("If statement outside function");
-                };
+                let ctx = context_or_err!(self, "If statement outside function");
 
                 // create blocks first
                 (
@@ -527,16 +456,7 @@ impl<'a> Emit<'a> {
             let cond_op = self.emit(&if_stmt.condition)?;
             self.builder.pop_branch();
 
-            let ctx = if let Some(func_idx) = self.current_function {
-                let func = &mut self.program.funcs[func_idx];
-                &mut BuilderContext {
-                    cfg: Some(&mut func.cfg),
-                    dfg: Some(&mut func.dfg),
-                    globals: &mut self.program.globals,
-                }
-            } else {
-                panic!("If statement outside function");
-            };
+            let ctx = context_or_err!(self, "If statement outside function");
 
             // create branch instructions
             self.builder.create(
@@ -557,16 +477,7 @@ impl<'a> Emit<'a> {
             self.emit(&if_stmt.then_block)?;
 
             // Re-acquire ctx
-            let ctx = if let Some(func_idx) = self.current_function {
-                let func = &mut self.program.funcs[func_idx];
-                &mut BuilderContext {
-                    cfg: Some(&mut func.cfg),
-                    dfg: Some(&mut func.dfg),
-                    globals: &mut self.program.globals,
-                }
-            } else {
-                panic!("If statement outside function");
-            };
+            let ctx = context_or_err!(self, "If statement outside function");
 
             // Add jump to end_block if not terminated
             self.builder.create(
@@ -586,16 +497,7 @@ impl<'a> Emit<'a> {
                 self.emit(if_stmt.else_block.as_ref().unwrap())?;
 
                 // Re-acquire ctx
-                let ctx = if let Some(func_idx) = self.current_function {
-                    let func = &mut self.program.funcs[func_idx];
-                    &mut BuilderContext {
-                        cfg: Some(&mut func.cfg),
-                        dfg: Some(&mut func.dfg),
-                        globals: &mut self.program.globals,
-                    }
-                } else {
-                    panic!("If statement outside function");
-                };
+                let ctx = context_or_err!(self, "If statement outside function");
 
                 // Add jump to end_block if not terminated
                 self.builder.create(
@@ -613,16 +515,7 @@ impl<'a> Emit<'a> {
             // set current block to end_block
             self.builder.set_current_block(end_block)?;
         } else if let Some(while_stmt) = cast::<While>(node) {
-            let ctx = if let Some(func_idx) = self.current_function {
-                let func = &mut self.program.funcs[func_idx];
-                &mut BuilderContext {
-                    cfg: Some(&mut func.cfg),
-                    dfg: Some(&mut func.dfg),
-                    globals: &mut self.program.globals,
-                }
-            } else {
-                panic!("While statement outside function");
-            };
+            let ctx = context_or_err!(self, "While statement outside function");
 
             // create blocks
             let while_entry = self.builder.create_new_block(ctx)?;
@@ -646,16 +539,7 @@ impl<'a> Emit<'a> {
             let cond_op = self.emit(&while_stmt.condition)?;
 
             // Re-acquire ctx
-            let ctx = if let Some(func_idx) = self.current_function {
-                let func = &mut self.program.funcs[func_idx];
-                &mut BuilderContext {
-                    cfg: Some(&mut func.cfg),
-                    dfg: Some(&mut func.dfg),
-                    globals: &mut self.program.globals,
-                }
-            } else {
-                panic!("While statement outside function");
-            };
+            let ctx = context_or_err!(self, "While statement outside function");
 
             // create branch instruction
             self.builder.create(
@@ -683,16 +567,7 @@ impl<'a> Emit<'a> {
             self.builder.pop_loop();
 
             // Re-acquire ctx
-            let ctx = if let Some(func_idx) = self.current_function {
-                let func = &mut self.program.funcs[func_idx];
-                &mut BuilderContext {
-                    cfg: Some(&mut func.cfg),
-                    dfg: Some(&mut func.dfg),
-                    globals: &mut self.program.globals,
-                }
-            } else {
-                panic!("While statement outside function");
-            };
+            let ctx = context_or_err!(self, "While statement outside function");
 
             // jump back to while_entry
             self.builder.create(
@@ -714,16 +589,7 @@ impl<'a> Emit<'a> {
                 .loop_stack
                 .last()
                 .ok_or("Break statement not inside a loop")?;
-            let ctx = if let Some(func_idx) = self.current_function {
-                let func = &mut self.program.funcs[func_idx];
-                &mut BuilderContext {
-                    cfg: Some(&mut func.cfg),
-                    dfg: Some(&mut func.dfg),
-                    globals: &mut self.program.globals,
-                }
-            } else {
-                return Err("Break statement not inside a function".to_string());
-            };
+            let ctx = context_or_err!(self, "Break statement not inside a function");
 
             self.builder.create(
                 ctx,
@@ -742,16 +608,7 @@ impl<'a> Emit<'a> {
                 .last()
                 .ok_or("Continue statement not inside a loop")?;
 
-            let ctx = if let Some(func_idx) = self.current_function {
-                let func = &mut self.program.funcs[func_idx];
-                &mut BuilderContext {
-                    cfg: Some(&mut func.cfg),
-                    dfg: Some(&mut func.dfg),
-                    globals: &mut self.program.globals,
-                }
-            } else {
-                return Err("Continue statement not inside a function".to_string());
-            };
+            let ctx = context_or_err!(self, "Continue statement not inside a function");
 
             self.builder.create(
                 ctx,
@@ -770,20 +627,7 @@ impl<'a> Emit<'a> {
             let lhs_op = self.emit(&assign_stmt.lhs)?;
 
             // create store
-            let ctx = if let Some(func_idx) = self.current_function {
-                let func = &mut self.program.funcs[func_idx];
-                &mut BuilderContext {
-                    cfg: Some(&mut func.cfg),
-                    dfg: Some(&mut func.dfg),
-                    globals: &mut self.program.globals,
-                }
-            } else {
-                &mut BuilderContext {
-                    cfg: None,
-                    dfg: None,
-                    globals: &mut self.program.globals,
-                }
-            };
+            let ctx = context!(self);
             self.builder.create(
                 ctx,
                 ir::Op::new(
@@ -815,16 +659,7 @@ impl<'a> Emit<'a> {
                 index_ops.push(op.unwrap());
             }
 
-            let ctx = if let Some(func_idx) = self.current_function {
-                let func = &mut self.program.funcs[func_idx];
-                &mut BuilderContext {
-                    cfg: Some(&mut func.cfg),
-                    dfg: Some(&mut func.dfg),
-                    globals: &mut self.program.globals,
-                }
-            } else {
-                panic!("Array access outside function");
-            };
+            let ctx = context_or_err!(self, "Array access outside function");
 
             // find whether the array is global or local
             let array_name = &array_access.name;
@@ -896,16 +731,7 @@ impl<'a> Emit<'a> {
                 arg_ops.push(arg_op.unwrap());
             }
 
-            let ctx = if let Some(func_idx) = self.current_function {
-                let func = &mut self.program.funcs[func_idx];
-                &mut BuilderContext {
-                    cfg: Some(&mut func.cfg),
-                    dfg: Some(&mut func.dfg),
-                    globals: &mut self.program.globals,
-                }
-            } else {
-                panic!("Call outside function");
-            };
+            let ctx = context_or_err!(self, "Call outside function");
 
             // create call op_id
             let call_op = self.builder.create(
@@ -924,16 +750,7 @@ impl<'a> Emit<'a> {
             let mut lhs = self.emit(&binary_op.lhs)?;
             if is::<VarAccess>(&binary_op.lhs) || is::<ArrayAccess>(&binary_op.lhs) {
                 // load lhs
-                let ctx = if let Some(func_idx) = self.current_function {
-                    let func = &mut self.program.funcs[func_idx];
-                    &mut BuilderContext {
-                        cfg: Some(&mut func.cfg),
-                        dfg: Some(&mut func.dfg),
-                        globals: &mut self.program.globals,
-                    }
-                } else {
-                    panic!("BinaryOp lhs load outside function");
-                };
+                let ctx = context_or_err!(self, "BinaryOp lhs load outside function");
                 let load_lhs = self.builder.create(
                     ctx,
                     ir::Op::new(
@@ -948,16 +765,7 @@ impl<'a> Emit<'a> {
             let mut rhs = self.emit(&binary_op.rhs)?;
             if is::<VarAccess>(&binary_op.rhs) || is::<ArrayAccess>(&binary_op.rhs) {
                 // load rhs
-                let ctx = if let Some(func_idx) = self.current_function {
-                    let func = &mut self.program.funcs[func_idx];
-                    &mut BuilderContext {
-                        cfg: Some(&mut func.cfg),
-                        dfg: Some(&mut func.dfg),
-                        globals: &mut self.program.globals,
-                    }
-                } else {
-                    panic!("BinaryOp rhs load outside function");
-                };
+                let ctx = context_or_err!(self, "BinaryOp rhs load outside function");
                 let load_rhs = self.builder.create(
                     ctx,
                     ir::Op::new(
@@ -970,17 +778,7 @@ impl<'a> Emit<'a> {
                 rhs = Some(load_rhs);
             }
 
-            let ctx = if let Some(func_idx) = self.current_function {
-                let func = &mut self.program.funcs[func_idx];
-                &mut BuilderContext {
-                    cfg: Some(&mut func.cfg),
-                    dfg: Some(&mut func.dfg),
-                    globals: &mut self.program.globals,
-                }
-            } else {
-                // BinaryOp can't appear outside function, since all the global expr have been folded.
-                panic!("BinaryOp outside function");
-            };
+            let ctx = context_or_err!(self, "BinaryOp outside function");
 
             // select Operator
             let typ = binary_op.typ.clone();
@@ -1164,16 +962,7 @@ impl<'a> Emit<'a> {
             let mut operand = self.emit(&unary_op.operand)?;
             // load operand
             if is::<VarAccess>(&unary_op.operand) || is::<ArrayAccess>(&unary_op.operand) {
-                let ctx = if let Some(func_idx) = self.current_function {
-                    let func = &mut self.program.funcs[func_idx];
-                    &mut BuilderContext {
-                        cfg: Some(&mut func.cfg),
-                        dfg: Some(&mut func.dfg),
-                        globals: &mut self.program.globals,
-                    }
-                } else {
-                    panic!("UnaryOp operand load outside function");
-                };
+                let ctx = context_or_err!(self, "UnaryOp operand load outside function");
                 let load_operand = self.builder.create(
                     ctx,
                     ir::Op::new(
@@ -1188,16 +977,7 @@ impl<'a> Emit<'a> {
                 operand = Some(load_operand);
             }
 
-            let ctx = if let Some(func_idx) = self.current_function {
-                let func = &mut self.program.funcs[func_idx];
-                &mut BuilderContext {
-                    cfg: Some(&mut func.cfg),
-                    dfg: Some(&mut func.dfg),
-                    globals: &mut self.program.globals,
-                }
-            } else {
-                panic!("UnaryOp outside function");
-            };
+            let ctx = context_or_err!(self, "UnaryOp outside function");
 
             // select Operator
             let typ = unary_op.typ.clone();
@@ -1265,20 +1045,7 @@ impl<'a> Emit<'a> {
                 .create(ctx, ir::Op::new(typ.clone(), vec![], op_data))?;
             return Ok(Some(un_op));
         } else if let Some(literal) = cast::<Literal>(node) {
-            let ctx = if let Some(func_idx) = self.current_function {
-                let func = &mut self.program.funcs[func_idx];
-                &mut BuilderContext {
-                    cfg: Some(&mut func.cfg),
-                    dfg: Some(&mut func.dfg),
-                    globals: &mut self.program.globals,
-                }
-            } else {
-                &mut BuilderContext {
-                    cfg: None,
-                    dfg: None,
-                    globals: &mut self.program.globals,
-                }
-            };
+            let ctx = context!(self);
 
             match literal {
                 Literal::Int(val) => {

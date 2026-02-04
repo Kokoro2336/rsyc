@@ -114,6 +114,25 @@ impl Arena<BasicBlock> for IndexedArena<BasicBlock> {
     }
 }
 
+impl IndexedArena<BasicBlock> {
+    pub fn add_succ(&mut self, bb_idx: Operand, succ_idx: Operand) -> Result<(), String> {
+        if let Some(node) = self.get_mut(bb_idx.get_bb_id()?)? {
+            node.succs.push(succ_idx);
+            Ok(())
+        } else {
+            Err("CFG add_succ: bb index not found".to_string())
+        }
+    }
+    pub fn add_pred(&mut self, bb_idx: Operand, pred_idx: Operand) -> Result<(), String> {
+        if let Some(node) = self.get_mut(bb_idx.get_bb_id()?)? {
+            node.preds.push(pred_idx);
+            Ok(())
+        } else {
+            Err("CFG add_pred: bb index not found".to_string())
+        }
+    }
+}
+
 impl Arena<Function> for IndexedArena<Function> {
     fn remove(&mut self, idx: usize) -> Result<usize, String> {
         // TODO
@@ -278,19 +297,5 @@ impl Arena<Function> for IndexedArena<Function> {
 impl IndexedArena<Function> {
     pub fn add(&mut self, func: Function) -> Result<usize, String> {
         Ok(self.alloc(func)?)
-    }
-}
-
-impl std::ops::Index<usize> for IndexedArena<Function> {
-    type Output = Function;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        self.get(index).unwrap().unwrap()
-    }
-}
-
-impl std::ops::IndexMut<usize> for IndexedArena<Function> {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        self.get_mut(index).unwrap().unwrap()
     }
 }
