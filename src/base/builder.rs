@@ -89,21 +89,7 @@ impl Builder {
             self.current_inst = None;
             return Ok(());
         }
-        if bb.cur.iter().any(|op_id| {
-            if let Some(inst_id) = &inst_id {
-                let op_id = match op_id.get_op_id() {
-                    Ok(id) => id,
-                    Err(_) => return false,
-                };
-                let inst_id = match inst_id.get_op_id() {
-                    Ok(id) => id,
-                    Err(_) => return false,
-                };
-                op_id == inst_id
-            } else {
-                false
-            }
-        }) {
+        if bb.cur.contains(&inst_id.clone().unwrap()) {
             self.current_inst = inst_id;
         } else {
             return Err(format!(

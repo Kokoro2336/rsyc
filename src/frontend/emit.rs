@@ -89,7 +89,7 @@ impl<'a> Emit<'a> {
                     .funcs
                     .add(Function::new(fn_decl.name.clone()))?,
             );
-            
+
             // get and store arguments
             // shadow the ctx to use function's cfg/dfg
             // in other branches, the ctx is already function's ctx
@@ -747,6 +747,201 @@ impl<'a> Emit<'a> {
             )?;
             return Ok(Some(call_op));
         } else if let Some(binary_op) = cast::<BinaryOp>(node) {
+            // And & Or need short-circuit evaluation, so we handle them separately.
+            match &binary_op.op {
+                ast::Op::And => {
+                    // Allocate the space for result first
+                    let (result_alloca, rhs_block, end_block) = {
+                        let ctx = context_or_err!(self, "BinaryOp And outside function");
+                        let result_alloca = self.builder.create(
+                            ctx,
+                            ir::Op::new(
+                                Type::Pointer {
+                                    base: Box::new(Type::Int),
+                                },
+                                vec![],
+                                OpData::Alloca(Type::Int.size_in_bytes()),
+                            ),
+                        )?;
+                        // store 0 first
+                        self.builder.create(
+                            ctx,
+                            ir::Op::new(
+                                Type::Void,
+                                vec![],
+                                OpData::Store {
+                                    addr: result_alloca.clone(),
+                                    value: Operand::Int(0),
+                                },
+                            ),
+                        )?;
+                        // create 2 blocks for short-circuit
+                        (
+                            result_alloca,
+                            self.builder.create_new_block(ctx)?,
+                            self.builder.create_new_block(ctx)?,
+                        )
+                    };
+
+                    // evaluate lhs
+                    let lhs_op = self.emit(&binary_op.lhs)?;
+                    // branch based on lhs
+                    {
+                        let ctx = context_or_err!(self, "BinaryOp And outside function");
+                        self.builder.create(
+                            ctx,
+                            ir::Op::new(
+                                Type::Void,
+                                vec![],
+                                OpData::Br {
+                                    cond: lhs_op.unwrap(),
+                                    then_bb: rhs_block.clone(),
+                                    else_bb: Some(end_block.clone()),
+                                },
+                            ),
+                        )?;
+                        // rhs block
+                        self.builder.set_current_block(rhs_block)?;
+                    }
+
+                    let rhs_op = self.emit(&binary_op.rhs)?;
+                    // store rhs to result_alloca
+                    let ctx = context_or_err!(self, "BinaryOp And outside function");
+                    self.builder.create(
+                        ctx,
+                        ir::Op::new(
+                            Type::Void,
+                            vec![],
+                            OpData::Store {
+                                addr: result_alloca.clone(),
+                                value: rhs_op.unwrap(),
+                            },
+                        ),
+                    )?;
+                    // jump to end block
+                    self.builder.create(
+                        ctx,
+                        ir::Op::new(
+                            Type::Void,
+                            vec![],
+                            OpData::Jump {
+                                target_bb: end_block.clone(),
+                            },
+                        ),
+                    )?;
+                    // end block
+                    self.builder.set_current_block(end_block)?;
+                    // load result
+                    let load_result = self.builder.create(
+                        ctx,
+                        ir::Op::new(
+                            Type::Int,
+                            vec![],
+                            OpData::Load {
+                                addr: result_alloca.clone(),
+                            },
+                        ),
+                    )?;
+                    return Ok(Some(load_result));
+                }
+                ast::Op::Or => {
+                    // Allocate the space for result first
+                    let (result_alloca, rhs_block, end_block) = {
+                        let ctx = context_or_err!(self, "BinaryOp Or outside function");
+                        let result_alloca = self.builder.create(
+                            ctx,
+                            ir::Op::new(
+                                Type::Pointer {
+                                    base: Box::new(Type::Int),
+                                },
+                                vec![],
+                                OpData::Alloca(Type::Int.size_in_bytes()),
+                            ),
+                        )?;
+                        // store 1 first
+                        self.builder.create(
+                            ctx,
+                            ir::Op::new(
+                                Type::Void,
+                                vec![],
+                                OpData::Store {
+                                    addr: result_alloca.clone(),
+                                    value: Operand::Int(1),
+                                },
+                            ),
+                        )?;
+                        // create 2 blocks for short-circuit
+                        (
+                            result_alloca,
+                            self.builder.create_new_block(ctx)?,
+                            self.builder.create_new_block(ctx)?,
+                        )
+                    };
+
+                    {
+                        // evaluate lhs
+                        let lhs_op = self.emit(&binary_op.lhs)?;
+                        // branch based on lhs
+                        let ctx = context_or_err!(self, "BinaryOp Or outside function");
+                        self.builder.create(
+                            ctx,
+                            ir::Op::new(
+                                Type::Void,
+                                vec![],
+                                OpData::Br {
+                                    cond: lhs_op.unwrap(),
+                                    then_bb: end_block.clone(),
+                                    else_bb: Some(rhs_block.clone()),
+                                },
+                            ),
+                        )?;
+                    }
+
+                    // rhs block
+                    self.builder.set_current_block(rhs_block)?;
+                    let rhs_op = self.emit(&binary_op.rhs)?;
+                    // store rhs to result_alloca
+                    let ctx = context_or_err!(self, "BinaryOp Or outside function");
+                    self.builder.create(
+                        ctx,
+                        ir::Op::new(
+                            Type::Void,
+                            vec![],
+                            OpData::Store {
+                                addr: result_alloca.clone(),
+                                value: rhs_op.unwrap(),
+                            },
+                        ),
+                    )?;
+                    // jump to end block
+                    self.builder.create(
+                        ctx,
+                        ir::Op::new(
+                            Type::Void,
+                            vec![],
+                            OpData::Jump {
+                                target_bb: end_block.clone(),
+                            },
+                        ),
+                    )?;
+                    // end block
+                    self.builder.set_current_block(end_block)?;
+                    // load result
+                    let load_result = self.builder.create(
+                        ctx,
+                        ir::Op::new(
+                            Type::Int,
+                            vec![],
+                            OpData::Load {
+                                addr: result_alloca.clone(),
+                            },
+                        ),
+                    )?;
+                    return Ok(Some(load_result));
+                }
+                _ => {}
+            }
+
             let mut lhs = self.emit(&binary_op.lhs)?;
             if is::<VarAccess>(&binary_op.lhs) || is::<ArrayAccess>(&binary_op.lhs) {
                 // load lhs
@@ -782,7 +977,7 @@ impl<'a> Emit<'a> {
 
             // select Operator
             let typ = binary_op.typ.clone();
-            let op_data = match binary_op.op.clone() {
+            let op_data = match &binary_op.op {
                 ast::Op::Add => {
                     if typ == Type::Int {
                         OpData::AddI {
